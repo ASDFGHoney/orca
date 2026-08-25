@@ -71,10 +71,20 @@ export const nativeSkillInstallFilesystem: SkillInstallFilesystem = {
     new Map(
       await runSkillCandidateTasks(
         directories.map((directory) => async (): Promise<[string, SkillDirectoryEntry[]]> => {
-          const entries = await readdir(directory, { withFileTypes: true }).catch(() => null)
+          // Only a confirmed absence may read as an empty directory: the delete
+          // planner treats an empty listing as "nothing left here" and removes
+          // the parent, so a swallowed EACCES/EIO would delete unenumerated files.
+          const entries = await readdir(directory, { withFileTypes: true }).catch(
+            (error: NodeJS.ErrnoException) => {
+              if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') {
+                return []
+              }
+              throw error
+            }
+          )
           return [
             directory,
-            (entries ?? []).map((entry) => ({ name: entry.name, kind: direntKind(entry) }))
+            entries.map((entry) => ({ name: entry.name, kind: direntKind(entry) }))
           ]
         })
       )

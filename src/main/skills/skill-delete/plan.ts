@@ -21,10 +21,10 @@ import {
   type SkillDeleteGuardContext
 } from './guards'
 import { buildSkillDeleteRootSet } from './roots'
-import type { ResolvedSkillDiscoveryTarget } from '..//'
-import type { SkillInstallFilesystem } from '..//'
-import type { SkillProviderRootOverrides } from '..//'
-import type { SkillScanRoot } from '..//'
+import type { ResolvedSkillDiscoveryTarget } from '../skill-discovery-target'
+import type { SkillInstallFilesystem } from '../skill-install-filesystem'
+import type { SkillProviderRootOverrides } from '../skill-provider-destinations'
+import type { SkillScanRoot } from '../skill-discovery-sources'
 
 /** Overlapping roots can reach one directory twice. Staging the same path twice
  *  would fail the second rename and roll the whole skill back. */

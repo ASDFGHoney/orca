@@ -9,7 +9,7 @@ import {
   skillPathsEqual,
   type SkillPathSemantics
 } from '../../../shared/skill-path-containment'
-import type { SkillScanRoot } from '..//'
+import type { SkillScanRoot } from '../skill-discovery-sources'
 import type { SkillPlacementCandidate } from './enumeration'
 
 /**

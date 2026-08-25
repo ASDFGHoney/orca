@@ -1,9 +1,9 @@
 import { posix as pathPosix, win32 as pathWin32 } from 'node:path'
 import { skillDirectoryMaxDepth } from '../../../shared/skill-discovery-depth'
 import type { SkillPathSemantics } from '../../../shared/skill-path-containment'
-import type { SkillScanRoot } from '..//'
-import type { SkillInstallFilesystem, SkillPathInspection } from '..//'
-import { SKILL_FILE_NAME } from '..//'
+import type { SkillScanRoot } from '../skill-discovery-sources'
+import type { SkillInstallFilesystem, SkillPathInspection } from '../skill-install-filesystem'
+import { SKILL_FILE_NAME } from '../skill-root-file-walk'
 import { isSkillStagingEntryName } from './staging-names'
 
 /** One directory in a discovery root that holds a `SKILL.md`, with everything
@@ -32,7 +32,11 @@ export function requireEnumerableFilesystem(filesystem: SkillInstallFilesystem):
   if (!filesystem.listEntries || !filesystem.inspectPaths) {
     throw new SkillDeleteEnumerationUnsupportedError()
   }
-  return { listEntries: filesystem.listEntries, inspectPaths: filesystem.inspectPaths }
+  // Bound, not detached: the WSL filesystem's `listEntries` reaches `this.runOutput`.
+  return {
+    listEntries: filesystem.listEntries.bind(filesystem),
+    inspectPaths: filesystem.inspectPaths.bind(filesystem)
+  }
 }
 
 /**

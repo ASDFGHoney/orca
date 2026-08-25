@@ -4,9 +4,12 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SkillDeleteRequest } from '../../../shared/skill-delete-contract'
 import { deleteSkills } from './service'
-import { acquireSkillInstallLock, skillInstallLockPath } from '..//'
-import { nativeSkillInstallFilesystem, type SkillInstallFilesystem } from '..//'
-import { readSkillInstallReceipt, writeSkillInstallReceipt } from '..//'
+import { acquireSkillInstallLock, skillInstallLockPath } from '../skill-install-lock'
+import {
+  nativeSkillInstallFilesystem,
+  type SkillInstallFilesystem
+} from '../skill-install-filesystem'
+import { readSkillInstallReceipt, writeSkillInstallReceipt } from '../skill-install-provenance'
 import { skillDeleteJournalPath } from './recovery'
 
 const roots: string[] = []

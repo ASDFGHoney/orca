@@ -6,10 +6,10 @@ import type {
   SkillDeleteResult
 } from '../../../shared/skill-delete-contract'
 import { deleteSkills, previewSkillDeletion, type SkillDeleteServiceInput } from './service'
-import type { ResolvedSkillDiscoveryTarget } from '..//'
-import { nativeSkillInstallFilesystem } from '..//'
-import type { SkillProviderRootOverrides } from '..//'
-import { WslSkillInstallFilesystem } from '..//'
+import type { ResolvedSkillDiscoveryTarget } from '../skill-discovery-target'
+import { nativeSkillInstallFilesystem } from '../skill-install-filesystem'
+import type { SkillProviderRootOverrides } from '../skill-provider-destinations'
+import { WslSkillInstallFilesystem } from '../skill-wsl-install-filesystem'
 
 /** Assembly shared by the local IPC channel and the runtime RPC method, so both
  *  transports resolve the same host, roots, and filesystem. */

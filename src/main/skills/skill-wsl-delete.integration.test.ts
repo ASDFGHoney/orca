@@ -1,19 +1,22 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { runProcess } from '../../shared/child-process/run-process'
+import { resolveWslExecutablePath } from '../wsl/wsl-executable-path'
 import { WslSkillInstallFilesystem } from './skill-wsl-install-filesystem'
 
-const execFileAsync = promisify(execFile)
 const DISTRO = process.env.ORCA_REAL_WSL_SKILL_DISTRO ?? 'Ubuntu-24.04'
 const RUN_REAL_WSL = process.platform === 'win32' && process.env.ORCA_REAL_WSL_SKILL_TEST === '1'
 
 async function runWsl(...args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('wsl.exe', ['-d', DISTRO, '--exec', ...args], {
-    encoding: 'utf8',
-    timeout: 30_000,
-    windowsHide: true
+  const result = await runProcess({
+    program: resolveWslExecutablePath(),
+    args: ['-d', DISTRO, '--exec', ...args],
+    timeoutMs: 30_000
   })
-  return stdout.trim()
+  // `runProcess` reports a non-zero exit as data; this harness wants it fatal.
+  if (result.code !== 0) {
+    throw new Error(`wsl ${args.join(' ')} exited ${result.code}: ${result.stderr.trim()}`)
+  }
+  return result.stdout.trim()
 }
 
 function uncPath(guestPath: string): string {

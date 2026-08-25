@@ -22,12 +22,15 @@ import {
   removeStagedSkillDeleteMoves,
   stageSkillDeleteMoves
 } from './staging'
-import { clearSkillDiscoveryCaches, type ResolvedSkillDiscoveryTarget } from '..//'
-import { acquireSkillInstallLock, skillInstallLockPath } from '..//'
-import { removeSkillInstallReceipt } from '..//'
-import type { SkillInstallFilesystem } from '..//'
-import type { SkillProviderRootOverrides } from '..//'
-import { recordSkillDeleteOperation } from '..//'
+import {
+  clearSkillDiscoveryCaches,
+  type ResolvedSkillDiscoveryTarget
+} from '../skill-discovery-target'
+import { acquireSkillInstallLock, skillInstallLockPath } from '../skill-install-lock'
+import { removeSkillInstallReceipt } from '../skill-install-provenance'
+import type { SkillInstallFilesystem } from '../skill-install-filesystem'
+import type { SkillProviderRootOverrides } from '../skill-provider-destinations'
+import { recordSkillDeleteOperation } from '../skill-operation-observability'
 
 export type SkillDeleteServiceInput = {
   request: SkillDeleteRequest

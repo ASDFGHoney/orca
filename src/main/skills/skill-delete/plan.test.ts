@@ -4,7 +4,10 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { SkillDeleteRequest } from '../../../shared/skill-delete-contract'
 import { buildSkillDeletePlan } from './plan'
-import { nativeSkillInstallFilesystem } from '..//'
+import { nativeSkillInstallFilesystem } from '../skill-install-filesystem'
+
+/** Windows rejects `symlink` with EPERM without elevation or Developer Mode. */
+const WINDOWS = process.platform === 'win32'
 
 const roots: string[] = []
 
@@ -56,86 +59,104 @@ function plan(home: string, deleteRequest: SkillDeleteRequest) {
 }
 
 describe('buildSkillDeletePlan placement enumeration', () => {
-  it('finds the canonical directory and every alias that resolves to it', async () => {
-    const { home } = await fixture()
-    const canonicalDirectory = join(home, '.agents', 'skills', 'demo')
-    const file = await writeSkill(canonicalDirectory, 'demo')
-    // An alias-dir: a symlinked directory in another agent's root.
-    await mkdir(join(home, '.claude', 'skills'), { recursive: true })
-    await symlink(canonicalDirectory, join(home, '.claude', 'skills', 'demo'), 'dir')
-    // An alias-file: a real directory whose SKILL.md is a symlink.
-    const aliasFileDirectory = join(home, '.codex', 'skills', 'demo')
-    await mkdir(aliasFileDirectory, { recursive: true })
-    await symlink(file, join(aliasFileDirectory, 'SKILL.md'))
+  it.skipIf(WINDOWS)(
+    'finds the canonical directory and every alias that resolves to it',
+    async () => {
+      const { home } = await fixture()
+      const canonicalDirectory = join(home, '.agents', 'skills', 'demo')
+      const file = await writeSkill(canonicalDirectory, 'demo')
+      // An alias-dir: a symlinked directory in another agent's root.
+      await mkdir(join(home, '.claude', 'skills'), { recursive: true })
+      await symlink(canonicalDirectory, join(home, '.claude', 'skills', 'demo'), 'dir')
+      // An alias-file: a real directory whose SKILL.md is a symlink.
+      const aliasFileDirectory = join(home, '.codex', 'skills', 'demo')
+      await mkdir(aliasFileDirectory, { recursive: true })
+      await symlink(file, join(aliasFileDirectory, 'SKILL.md'))
 
-    const resolved = await plan(home, await request(file))
-    const entry = resolved.plan.skills[0]
-    expect(entry.blocked).toBeUndefined()
-    expect(new Set(entry.placements.map((placement) => placement.kind))).toEqual(
-      new Set(['canonical', 'alias-dir', 'alias-file'])
-    )
-    expect(entry.placements.map((placement) => placement.path)).toContain(canonicalDirectory)
-  })
+      const resolved = await plan(home, await request(file))
+      const entry = resolved.plan.skills[0]
+      expect(entry.blocked).toBeUndefined()
+      expect(new Set(entry.placements.map((placement) => placement.kind))).toEqual(
+        new Set(['canonical', 'alias-dir', 'alias-file'])
+      )
+      expect(entry.placements.map((placement) => placement.path)).toContain(canonicalDirectory)
+    }
+  )
 
-  it('classifies a directory whose SKILL.md is a symlink as alias-file, not canonical', async () => {
-    const { home } = await fixture()
-    const canonicalDirectory = join(home, '.agents', 'skills', 'demo')
-    const file = await writeSkill(canonicalDirectory, 'demo')
-    const aliasDirectory = join(home, '.claude', 'skills', 'demo')
-    await mkdir(aliasDirectory, { recursive: true })
-    await symlink(file, join(aliasDirectory, 'SKILL.md'))
+  it.skipIf(WINDOWS)(
+    'classifies a directory whose SKILL.md is a symlink as alias-file, not canonical',
+    async () => {
+      const { home } = await fixture()
+      const canonicalDirectory = join(home, '.agents', 'skills', 'demo')
+      const file = await writeSkill(canonicalDirectory, 'demo')
+      const aliasDirectory = join(home, '.claude', 'skills', 'demo')
+      await mkdir(aliasDirectory, { recursive: true })
+      await symlink(file, join(aliasDirectory, 'SKILL.md'))
 
-    const resolved = await plan(home, await request(file))
-    const alias = resolved.plan.skills[0].placements.find(
-      (placement) => placement.path === aliasDirectory
-    )
-    expect(alias?.kind).toBe('alias-file')
-  })
+      const resolved = await plan(home, await request(file))
+      const alias = resolved.plan.skills[0].placements.find(
+        (placement) => placement.path === aliasDirectory
+      )
+      expect(alias?.kind).toBe('alias-file')
+    }
+  )
 
-  it('removes a home-root link to content outside every root, and only the link', async () => {
-    const { home } = await fixture()
-    const outside = join(home, 'elsewhere', 'demo')
-    await writeSkill(outside, 'demo')
-    await mkdir(join(home, '.claude', 'skills'), { recursive: true })
-    await symlink(outside, join(home, '.claude', 'skills', 'demo'), 'dir')
+  it.skipIf(WINDOWS)(
+    'removes a home-root link to content outside every root, and only the link',
+    async () => {
+      const { home } = await fixture()
+      const outside = join(home, 'elsewhere', 'demo')
+      await writeSkill(outside, 'demo')
+      await mkdir(join(home, '.claude', 'skills'), { recursive: true })
+      await symlink(outside, join(home, '.claude', 'skills', 'demo'), 'dir')
 
-    const resolved = await plan(
-      home,
-      await request(join(home, '.claude', 'skills', 'demo', 'SKILL.md'))
-    )
-    expect(resolved.plan.skills[0].blocked).toBeUndefined()
-    expect(resolved.plan.skills[0].placements).toEqual([
-      expect.objectContaining({ path: join(home, '.claude', 'skills', 'demo'), kind: 'alias-dir' })
-    ])
-  })
+      const resolved = await plan(
+        home,
+        await request(join(home, '.claude', 'skills', 'demo', 'SKILL.md'))
+      )
+      expect(resolved.plan.skills[0].blocked).toBeUndefined()
+      expect(resolved.plan.skills[0].placements).toEqual([
+        expect.objectContaining({
+          path: join(home, '.claude', 'skills', 'demo'),
+          kind: 'alias-dir'
+        })
+      ])
+    }
+  )
 
-  it('deletes the links of a repo skill whose content lives outside every root', async () => {
-    // The shape that bit a real user: `<repo>/.agents/skills/<name>` is a link
-    // to a tool-managed directory elsewhere on disk. The links are Orca's to
-    // remove; the content behind them is not.
-    const { home } = await fixture()
-    const repo = join(home, 'projects', 'app')
-    const managedElsewhere = join(home, '.local', 'share', 'devex', 'skills', 'demo')
-    await writeSkill(managedElsewhere, 'demo')
-    await mkdir(join(repo, '.agents', 'skills'), { recursive: true })
-    await symlink(managedElsewhere, join(repo, '.agents', 'skills', 'demo'), 'dir')
+  it.skipIf(WINDOWS)(
+    'deletes the links of a repo skill whose content lives outside every root',
+    async () => {
+      // The shape that bit a real user: `<repo>/.agents/skills/<name>` is a link
+      // to a tool-managed directory elsewhere on disk. The links are Orca's to
+      // remove; the content behind them is not.
+      const { home } = await fixture()
+      const repo = join(home, 'projects', 'app')
+      const managedElsewhere = join(home, '.local', 'share', 'devex', 'skills', 'demo')
+      await writeSkill(managedElsewhere, 'demo')
+      await mkdir(join(repo, '.agents', 'skills'), { recursive: true })
+      await symlink(managedElsewhere, join(repo, '.agents', 'skills', 'demo'), 'dir')
 
-    const linked = join(repo, '.agents', 'skills', 'demo', 'SKILL.md')
-    const resolved = await buildSkillDeletePlan({
-      request: await request(linked),
-      target: { kind: 'native-host', cwd: undefined },
-      repos: [{ id: 'repo-1', name: 'app', path: repo } as never],
-      filesystem: nativeSkillInstallFilesystem,
-      homeDir: home
-    })
-    const entry = resolved.plan.skills[0]
-    expect(entry.blocked).toBeUndefined()
-    expect(entry.placements).toEqual([
-      expect.objectContaining({ path: join(repo, '.agents', 'skills', 'demo'), kind: 'alias-dir' })
-    ])
-    // Nothing outside the roots is ever offered for removal.
-    expect(entry.placements.some((placement) => placement.path.includes('devex'))).toBe(false)
-  })
+      const linked = join(repo, '.agents', 'skills', 'demo', 'SKILL.md')
+      const resolved = await buildSkillDeletePlan({
+        request: await request(linked),
+        target: { kind: 'native-host', cwd: undefined },
+        repos: [{ id: 'repo-1', name: 'app', path: repo } as never],
+        filesystem: nativeSkillInstallFilesystem,
+        homeDir: home
+      })
+      const entry = resolved.plan.skills[0]
+      expect(entry.blocked).toBeUndefined()
+      expect(entry.placements).toEqual([
+        expect.objectContaining({
+          path: join(repo, '.agents', 'skills', 'demo'),
+          kind: 'alias-dir'
+        })
+      ])
+      // Nothing outside the roots is ever offered for removal.
+      expect(entry.placements.some((placement) => placement.path.includes('devex'))).toBe(false)
+    }
+  )
 
   it('still refuses when the content is outside and no link sits in a root', async () => {
     const { home } = await fixture()
@@ -146,19 +167,22 @@ describe('buildSkillDeletePlan placement enumeration', () => {
     expect(resolved.plan.skills[0].placements).toEqual([])
   })
 
-  it('refuses a bundled skill even when the row claimed a home source', async () => {
-    const { home } = await fixture()
-    const bundled = join(home, '.claude', 'skills', '.system', 'demo')
-    const file = await writeSkill(bundled, 'demo')
-    // Symlinked into a plain home root, which is what makes the row read `home`.
-    await mkdir(join(home, '.agents', 'skills'), { recursive: true })
-    await symlink(bundled, join(home, '.agents', 'skills', 'demo'), 'dir')
+  it.skipIf(WINDOWS)(
+    'refuses a bundled skill even when the row claimed a home source',
+    async () => {
+      const { home } = await fixture()
+      const bundled = join(home, '.claude', 'skills', '.system', 'demo')
+      const file = await writeSkill(bundled, 'demo')
+      // Symlinked into a plain home root, which is what makes the row read `home`.
+      await mkdir(join(home, '.agents', 'skills'), { recursive: true })
+      await symlink(bundled, join(home, '.agents', 'skills', 'demo'), 'dir')
 
-    const resolved = await plan(home, await request(file))
-    expect(resolved.plan.skills[0].blocked).toBe('bundled')
-  })
+      const resolved = await plan(home, await request(file))
+      expect(resolved.plan.skills[0].blocked).toBe('bundled')
+    }
+  )
 
-  it('refuses a plugin-cache skill symlinked into a plain home root', async () => {
+  it.skipIf(WINDOWS)('refuses a plugin-cache skill symlinked into a plain home root', async () => {
     const { home } = await fixture()
     const cached = join(home, '.codex', 'plugins', 'cache', 'pack', 'demo')
     const file = await writeSkill(cached, 'demo')

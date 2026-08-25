@@ -6,8 +6,15 @@ import {
   type SkillDeletePlacementKind
 } from '../../../shared/skill-delete-contract'
 import { nativeSkillPathSemantics, skillPathInside } from '../../../shared/skill-path-containment'
-import { nativeSkillInstallFilesystem, type SkillInstallFilesystem } from '..//'
-import { removeSkillInstallReceipt, skillInstallStateKey, writeSkillStateFile } from '..//'
+import {
+  nativeSkillInstallFilesystem,
+  type SkillInstallFilesystem
+} from '../skill-install-filesystem'
+import {
+  removeSkillInstallReceipt,
+  skillInstallStateKey,
+  writeSkillStateFile
+} from '../skill-install-provenance'
 import { isSkillDeleteStagedName } from './staging-names'
 
 const JOURNAL_MAX_BYTES = 4 * 1024 * 1024
@@ -158,9 +165,18 @@ export async function recoverSkillDeleteTransaction(
     // Roll back in reverse of staging order, so a restored alias never points at
     // a canonical directory that does not exist yet. Indexed rather than
     // `toReversed()`: this module reaches the Node 18 relay bundle.
+    let restoredEvery = true
     for (let index = staged.length - 1; index >= 0; index -= 1) {
       const move = staged[index]
-      await filesystem.rename(move.stagedPath, move.sourcePath).catch(() => undefined)
+      // Keep going past a failure so the other moves still come back, but keep
+      // the journal: dropping it here strands the staged path with no record
+      // that startup could retry from. Restores are idempotent.
+      await filesystem.rename(move.stagedPath, move.sourcePath).catch(() => {
+        restoredEvery = false
+      })
+    }
+    if (!restoredEvery) {
+      return
     }
   }
   await rm(skillDeleteJournalPath(stateDirectory, canonicalPath), { force: true })

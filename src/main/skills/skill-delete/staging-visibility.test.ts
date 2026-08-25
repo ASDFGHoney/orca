@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { buildWslSkillDiscoveryCommand } from '..//'
-import { findSkillFiles } from '..//'
+import { buildWslSkillDiscoveryCommand } from '../skill-discovery-wsl'
+import { findSkillFiles } from '../skill-root-file-walk'
 import { isSkillStagingEntryName, skillDeleteStagedName, SKILL_STAGING_GLOB } from './staging-names'
 
 const roots: string[] = []

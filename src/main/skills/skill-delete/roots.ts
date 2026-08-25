@@ -7,11 +7,11 @@ import {
   type SkillPathSemantics
 } from '../../../shared/skill-path-containment'
 import { toWindowsWslPath } from '../../../shared/wsl-paths'
-import { discoverClaudePluginSkillSources } from './claude-plugin-skill-sources'
-import { discoverClaudePluginSkillSourcesInWsl } from './claude-plugin-skill-sources-wsl'
-import { buildSkillDiscoverySources, type SkillScanRoot } from '..//'
-import type { ResolvedSkillDiscoveryTarget } from '..//'
-import type { SkillProviderRootOverrides } from '..//'
+import { discoverClaudePluginSkillSources } from '../claude-plugin-skill-sources'
+import { discoverClaudePluginSkillSourcesInWsl } from '../claude-plugin-skill-sources-wsl'
+import { buildSkillDiscoverySources, type SkillScanRoot } from '../skill-discovery-sources'
+import type { ResolvedSkillDiscoveryTarget } from '../skill-discovery-target'
+import type { SkillProviderRootOverrides } from '../skill-provider-destinations'
 
 /**
  * The delete host owns everything about where skills may live, so it rebuilds

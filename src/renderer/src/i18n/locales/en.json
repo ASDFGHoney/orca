@@ -4670,6 +4670,7 @@
           "confirmPermanent": "This cannot be undone.",
           "failed": "Could not delete skills",
           "hostUnresolved": "Still finding the machine that owns these skills.",
+          "hostUpdateRequired": "Update Orca on the selected machine to delete skills.",
           "nothingOne": "That skill cannot be deleted from here.",
           "nothingOther": "None of the {{count}} selected skills can be deleted from here.",
           "placementSummaryParts": "Removes {{parts}} across {{roots}}.",

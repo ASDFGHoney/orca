@@ -86,9 +86,18 @@ export function skillDeletePlacementSummary(plan: SkillDeletePlan): string | nul
   )
 }
 
+/**
+ * Not `node:path`: the renderer may be showing a Windows host's paths from macOS,
+ * so `dirname` would pick the wrong separator. Both separators are honoured, and
+ * a root keeps its trailing one — `/SKILL.md` is `/`, `C:\SKILL.md` is `C:\`.
+ */
 function parentDirectory(path: string): string {
   const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-  return index > 0 ? path.slice(0, index) : path
+  if (index < 0) {
+    return path
+  }
+  const isDriveRoot = index === 2 && path[1] === ':'
+  return index === 0 || isDriveRoot ? path.slice(0, index + 1) : path.slice(0, index)
 }
 
 /**

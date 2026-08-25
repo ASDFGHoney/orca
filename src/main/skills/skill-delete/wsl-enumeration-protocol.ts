@@ -1,4 +1,8 @@
-import type { SkillDirectoryEntry, SkillFilesystemEntryKind, SkillPathInspection } from '..//'
+import type {
+  SkillDirectoryEntry,
+  SkillFilesystemEntryKind,
+  SkillPathInspection
+} from '../skill-install-filesystem'
 
 /**
  * Guest-side enumeration for path-based skill deletion.
@@ -98,10 +102,12 @@ export function parseWslListEntriesOutput(
     }
     const name = fields[index++]
     const kind = fields[index++]
-    if (name === undefined || !isEntryKind(kind)) {
+    // An `E` before any `D` would silently vanish, and a listing short of its
+    // real contents reads to the planner as an empty directory it may remove.
+    if (name === undefined || !isEntryKind(kind) || current === undefined) {
       throw new WslEnumerationProtocolError()
     }
-    current?.push({ name, kind })
+    current.push({ name, kind })
   }
   return listings
 }

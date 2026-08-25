@@ -9,7 +9,11 @@ import {
   writeSkillDeleteJournal,
   type SkillDeleteJournalV1
 } from './recovery'
-import { writeSkillStateFile } from '..//'
+import {
+  nativeSkillInstallFilesystem,
+  type SkillInstallFilesystem
+} from '../skill-install-filesystem'
+import { writeSkillStateFile } from '../skill-install-provenance'
 import { skillDeleteStagedName } from './staging-names'
 
 const roots: string[] = []
@@ -144,6 +148,30 @@ describe('recoverSkillDeleteTransaction', () => {
     await recoverSkillDeleteTransaction(stateDirectory, canonicalPath)
     expect(await exists(canonicalPath)).toBe(true)
     expect(await exists(entry.moves[0].stagedPath)).toBe(false)
+    expect(await exists(skillDeleteJournalPath(stateDirectory, canonicalPath))).toBe(false)
+  })
+
+  it('keeps the journal when a rollback rename fails, so startup can retry it', async () => {
+    const { stateDirectory, root } = await fixture()
+    const canonicalPath = join(root, 'demo')
+    const entry = journal(root, canonicalPath, { phase: 'staging' })
+    await mkdir(entry.moves[0].stagedPath, { recursive: true })
+    await writeSkillDeleteJournal(stateDirectory, entry)
+
+    const filesystem: SkillInstallFilesystem = {
+      ...nativeSkillInstallFilesystem,
+      rename: () => Promise.reject(new Error('EPERM'))
+    }
+    await recoverSkillDeleteTransaction(stateDirectory, canonicalPath, filesystem)
+
+    // Journal retained: the staged path is still parked, and dropping the record
+    // would strand it with nothing left to retry from.
+    expect(await exists(entry.moves[0].stagedPath)).toBe(true)
+    expect(await exists(skillDeleteJournalPath(stateDirectory, canonicalPath))).toBe(true)
+
+    // Retry on a working filesystem completes and only then clears the journal.
+    await recoverSkillDeleteTransaction(stateDirectory, canonicalPath)
+    expect(await exists(canonicalPath)).toBe(true)
     expect(await exists(skillDeleteJournalPath(stateDirectory, canonicalPath))).toBe(false)
   })
 

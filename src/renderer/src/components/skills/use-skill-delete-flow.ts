@@ -8,7 +8,6 @@ import type {
   SkillDeleteRequest,
   SkillDeleteResult
 } from '../../../../shared/skill-delete-contract'
-import { SKILL_DELETE_UPDATE_REQUIRED_MESSAGE } from '../../../../shared/skill-install-capability'
 import type { DiscoveredSkill } from '../../../../shared/skills'
 import {
   deleteSkillsOnRuntimeTarget,
@@ -173,8 +172,13 @@ function blockedOnlyResult(plan: SkillDeletePlan): SkillDeleteResult {
 }
 
 function unsupportedReason(runtimeTarget: RuntimeClientTarget | null): string {
+  // The shared constant is the wire-side error text; what the user reads here
+  // goes through the catalog like every other string in this panel.
   return runtimeTarget
-    ? SKILL_DELETE_UPDATE_REQUIRED_MESSAGE
+    ? translate(
+        'auto.components.skills.SkillDelete.hostUpdateRequired',
+        'Update Orca on the selected machine to delete skills.'
+      )
     : translate(
         'auto.components.skills.SkillDelete.hostUnresolved',
         'Still finding the machine that owns these skills.'
