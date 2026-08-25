@@ -173,3 +173,21 @@ describe('the owner relabel keeps the label and swaps only the brand', () => {
     expect(normalizeCompatibleAgentTitleForOwner('⠋ OMP', 'pi')).toBe('⠋ Pi')
   })
 })
+
+describe('the state separator does not fire on ordinary titles', () => {
+  // Why: the separator check runs on every title, so a project named `omp-harness` or a task
+  // description starting "pi - …" must not read as an agent state. The owner rewrite only ever
+  // emits the exact profile casing, so lowercase prose is safe to reject.
+  it.each([
+    'omp-harness ready',
+    'pi-scratch ready',
+    'pipeline - build',
+    'pip - install',
+    'pi - refactor the parser',
+    'omp - deploy notes',
+    'npm - run build',
+    'node - server'
+  ])('classifies %s as no agent', (title) => {
+    expect(detectAgentStatusFromTitle(title)).toBeNull()
+  })
+})

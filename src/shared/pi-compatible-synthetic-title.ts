@@ -6,9 +6,10 @@ const PI_COMPATIBLE_SYNTHETIC_TITLE_RE =
 // Why: legacy Pi/OMP-compatible shells can emit the delimiter before cwd text exists.
 const LEGACY_PI_COMPATIBLE_TITLE_RE = /^\s*(?:[\u2800-\u28ff]\s+)?π(?:\s*[-:]|\s)\s*.*$/u
 // Why: the state separator sits directly after the brand — `π ! label`, `OMP > label`. The brand
-// may already have been swapped for the owner's label, so accept either form. The separator must
-// be delimited (`:` attached, or spaced) or a project named `omp-harness` reads as a state.
-const PI_COMPATIBLE_SEPARATOR_RE = /^\s*(?:π|pi|omp)(?::|\s+([!>-]))(?=\s|$)/iu
+// may already have been swapped for the owner's label, so accept those too — but only in their
+// exact profile casing, since a lowercase `pi - refactor…` is ordinary prose, not a Pi title.
+// The separator must be delimited (`:` attached, or spaced) or `omp-harness` reads as a state.
+const PI_COMPATIBLE_SEPARATOR_RE = /^\s*(?:π|Pi|OMP)(?::|\s+([!>-]))(?=\s|$)/u
 
 function containsBrailleSpinner(title: string): boolean {
   for (const char of title) {
