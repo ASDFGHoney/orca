@@ -10,7 +10,7 @@ import { clearPendingPRCommentAiAck } from '../pr-comments-ai-launch-ack'
 import {
   buildGitHubPRRefreshStateClearToken,
   getGitHubPRRefreshStateExpiryAt
-} from '@/store/slices/github'
+} from '@/store/github/pr-refresh-state'
 import type { ChecksPanelControllerState } from './use-checks-panel-controller-state'
 import { recordChecksPanelPRRefreshBreadcrumb } from '../checks-panel-pr-refresh-breadcrumb'
 import { isChecksPanelHardRefreshErrorType } from '../checks-panel-review-creation'

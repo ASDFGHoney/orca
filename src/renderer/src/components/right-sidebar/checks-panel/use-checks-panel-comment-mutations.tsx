@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
-import { mergePRCommentIntoList } from '@/store/slices/github'
+import { mergePRCommentIntoList } from '@/store/github/pr-comment-cache'
 import { githubProjectHost } from '../../../../../shared/github/project-identity'
 import { setReactionOnSubject, restoreReactionOnSubject } from '@/lib/pr-comment-reactions'
 import { buildPRCommentConversationReplyBody } from '../pr-comment-fixing-reply-body'

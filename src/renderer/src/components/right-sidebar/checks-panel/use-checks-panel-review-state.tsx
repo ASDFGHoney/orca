@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef } from 'react'
 import { useAppStore } from '@/store'
-import { prChecksCacheSuffix, prCommentsCacheSuffix } from '@/store/slices/github'
+import { prChecksCacheSuffix, prCommentsCacheSuffix } from '@/store/github/cache-identity'
 import { getGitHubRepoCacheKey } from '@/store/slices/github-cache-key'
 import {
   buildChecksPanelEligibilityGitFingerprint,
