@@ -188,8 +188,16 @@ export function MobileNativeChatView({
   )
 
   // Follow growth and keyboard opening only while the user remains at the tail.
+  const previousKeyboardInset = useRef(keyboardInset)
   useEffect(() => {
-    if (data.length === 0 || !atBottom) {
+    // A keyboard reaching zero is usually the user's own downward swipe, and the
+    // viewport growing behind it can hold `atBottom` true — so following the tail
+    // here would undo the scroll they just made. Only a full close counts, so a
+    // merely shorter keyboard still follows. `onContentSizeChange` is untouched:
+    // it fires on content, not viewport, so it cannot re-trigger this.
+    const keyboardLeaving = keyboardInset === 0 && previousKeyboardInset.current > 0
+    previousKeyboardInset.current = keyboardInset
+    if (data.length === 0 || !atBottom || keyboardLeaving) {
       return
     }
     const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60)

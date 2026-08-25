@@ -478,6 +478,30 @@ describe('MobileNativeChatView', () => {
     }
   })
 
+  it('does not yank the list back to the tail when the keyboard is swiped away', async () => {
+    // Dismissing by drag scrolls the transcript, and the viewport grows as the
+    // keyboard leaves — so `atBottom` can survive the swipe and the tail-follow
+    // would undo exactly the scroll the user just made.
+    vi.useFakeTimers()
+    try {
+      const folded = [assistantTurn('a1', 'The tests pass.')]
+      mocks.keyboardState = KEYBOARD_OPEN
+      mocks.keyboardHeight = KEYBOARD_HEIGHT
+      await render({ folded, keyboardInset: ROUTE_INSET })
+      await act(async () => vi.advanceTimersByTime(200))
+      listInstance.scrollToEnd.mockClear()
+
+      mocks.keyboardState = KEYBOARD_CLOSED
+      mocks.keyboardHeight = 0
+      await update({ folded, keyboardInset: 0 })
+      await act(async () => vi.advanceTimersByTime(200))
+
+      expect(listInstance.scrollToEnd).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('still follows the tail when the keyboard only gets shorter', async () => {
     // Attaching a hardware keyboard drops the inset to the accessory bar; the
     // keyboard has not left, so a new message must still pull the tail in.
