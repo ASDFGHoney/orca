@@ -149,12 +149,12 @@ export function createPtyForegroundProcessTracker(args: {
         }
         if (!processName || !recognizeAgentProcess(processName)) {
           if (process.platform === 'win32' && fallbackIsShell && cachedAgentForeground !== null) {
-            return readWindowsConptyProcessIds(proc.pid).then((consoleProcessIds) => {
-              if (args.isDead() || consoleProcessIds === null || consoleProcessIds.size > 1) {
-                return
-              }
-              retireStaleForegroundIdentity()
-            })
+            const consoleProcessIds = readWindowsConptyProcessIds(proc)
+            if (consoleProcessIds === null || consoleProcessIds.size > 1) {
+              return
+            }
+            retireStaleForegroundIdentity()
+            return
           }
           retireStaleForegroundIdentity()
           return
@@ -247,7 +247,7 @@ export function createPtyForegroundProcessTracker(args: {
             ...(process.platform === 'win32'
               ? {
                   forceProcessScan: true,
-                  readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc.pid)
+                  readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc)
                 }
               : {})
           }

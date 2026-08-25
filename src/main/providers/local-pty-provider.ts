@@ -1414,7 +1414,7 @@ export class LocalPtyProvider implements IPtyProvider {
       canConfirmAgentFromConsolePresence(cachedAgent, fallbackProcess)
     ) {
       try {
-        const consoleProcessIds = await readWindowsConptyProcessIds(proc.pid)
+        const consoleProcessIds = readWindowsConptyProcessIds(proc)
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
@@ -1480,7 +1480,7 @@ export class LocalPtyProvider implements IPtyProvider {
           ...(process.platform === 'win32'
             ? {
                 forceProcessScan: true,
-                readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc.pid)
+                readWindowsConptyProcessIds: () => readWindowsConptyProcessIds(proc)
               }
             : {})
         }

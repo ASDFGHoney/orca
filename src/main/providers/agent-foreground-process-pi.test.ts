@@ -52,7 +52,7 @@ describe('Pi Windows foreground recognition', () => {
     getAllProcessesMock.mockImplementation((cb: (snapshot: unknown) => void) => {
       cb(withSelf(rows))
     })
-    const readWindowsConptyProcessIds = vi.fn(async () => new Set([100, 101]))
+    const readWindowsConptyProcessIds = vi.fn(() => new Set([100, 101]))
 
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'node.exe', {

@@ -96,7 +96,7 @@ export function applyLocalPtyProviderMockDefaults(mocks: LocalPtyProviderMocks):
     })
   )
   mocks.readWindowsConptyProcessIdsMock.mockReset()
-  mocks.readWindowsConptyProcessIdsMock.mockResolvedValue(null)
+  mocks.readWindowsConptyProcessIdsMock.mockReturnValue(null)
   mocks.isWslAvailableAsyncMock.mockReset()
   mocks.isWslAvailableAsyncMock.mockResolvedValue(true)
   mocks.wslUncDirectoryExistsMock.mockReset()

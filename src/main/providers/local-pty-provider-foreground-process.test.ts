@@ -236,7 +236,7 @@ describe('LocalPtyProvider', () => {
         processName: 'claude'
       })
       // A child beyond the shell is still attached to this console.
-      readWindowsConptyProcessIdsMock.mockResolvedValue(new Set([12345, 999]))
+      readWindowsConptyProcessIdsMock.mockReturnValue(new Set([12345, 999]))
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       // First call establishes the agent identity via the scan.
@@ -254,7 +254,7 @@ describe('LocalPtyProvider', () => {
         available: true,
         processName: 'claude'
       })
-      readWindowsConptyProcessIdsMock.mockResolvedValue(new Set([12345]))
+      readWindowsConptyProcessIdsMock.mockReturnValue(new Set([12345]))
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
@@ -268,7 +268,7 @@ describe('LocalPtyProvider', () => {
       resolveAgentForegroundProcessMock
         .mockResolvedValueOnce({ available: true, processName: 'claude' })
         .mockResolvedValue({ available: true, processName: null })
-      readWindowsConptyProcessIdsMock.mockResolvedValue(null)
+      readWindowsConptyProcessIdsMock.mockReturnValue(null)
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
@@ -282,7 +282,7 @@ describe('LocalPtyProvider', () => {
       resolveAgentForegroundProcessMock
         .mockResolvedValueOnce({ available: true, processName: 'claude' })
         .mockResolvedValue({ available: true, processName: null })
-      readWindowsConptyProcessIdsMock.mockResolvedValue(new Set([12345]))
+      readWindowsConptyProcessIdsMock.mockReturnValue(new Set([12345]))
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')

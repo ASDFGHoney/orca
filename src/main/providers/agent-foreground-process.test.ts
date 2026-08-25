@@ -508,7 +508,7 @@ describe('resolveAgentForegroundProcess', () => {
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
         fresh: true,
-        readWindowsConptyProcessIds: async () => new Set([100, 101])
+        readWindowsConptyProcessIds: () => new Set([100, 101])
       })
     ).resolves.toEqual({ available: true, processName: 'droid' })
   })
@@ -655,7 +655,7 @@ describe('resolveAgentForegroundProcess', () => {
         commandLine: 'droid'
       }
     ])
-    const readWindowsConptyProcessIds = vi.fn(async () => new Set([100, 101, 999]))
+    const readWindowsConptyProcessIds = vi.fn(() => new Set([100, 101, 999]))
 
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
@@ -686,7 +686,7 @@ describe('resolveAgentForegroundProcess', () => {
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {
         fresh: true,
-        readWindowsConptyProcessIds: async () => new Set([100, 999])
+        readWindowsConptyProcessIds: () => new Set([100, 999])
       })
     ).resolves.toEqual({ available: true, processName: 'powershell.exe' })
   })
@@ -701,7 +701,7 @@ describe('resolveAgentForegroundProcess', () => {
         commandLine: 'powershell.exe'
       }
     ])
-    const readWindowsConptyProcessIds = vi.fn(async () => new Set([100, 999]))
+    const readWindowsConptyProcessIds = vi.fn(() => new Set([100, 999]))
 
     await expect(
       resolveAgentForegroundProcessWithAvailability(100, 'powershell.exe', {

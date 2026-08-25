@@ -23,7 +23,7 @@ export type AgentForegroundResolutionOptions = {
   /** Force confirmation scans even when node-pty reports a recognized name. */
   forceProcessScan?: boolean
   /** Lazily proves which global descendants still belong to this ConPTY. */
-  readWindowsConptyProcessIds?: () => Promise<ReadonlySet<number> | null>
+  readWindowsConptyProcessIds?: () => ReadonlySet<number> | null
 }
 
 export type WindowsAgentForegroundResolution = {
@@ -72,11 +72,14 @@ export async function resolveWindowsAgentForegroundProcessWithAvailability(
   )
   let filteredCandidates = candidates
   if (hasRecognizedCandidate && options.readWindowsConptyProcessIds) {
-    const conptyProcessIds = await options.readWindowsConptyProcessIds()
-    if (!conptyProcessIds) {
-      return { available: false, processName: null }
+    const conptyProcessIds = options.readWindowsConptyProcessIds()
+    // Why not bail on null: membership only ever NARROWED the candidates. When
+    // it cannot answer, the unfiltered list is still a usable answer, and
+    // failing the whole resolution instead reported "unavailable" exactly while
+    // an agent was recognized -- disabling the callers that gate on it.
+    if (conptyProcessIds) {
+      filteredCandidates = candidates.filter((candidate) => conptyProcessIds.has(candidate.pid))
     }
-    filteredCandidates = candidates.filter((candidate) => conptyProcessIds.has(candidate.pid))
   }
   return {
     available: true,

@@ -84,7 +84,7 @@ describe('daemon pty foreground degraded-scan handling', () => {
     isPwshAvailableMock.mockReturnValue(false)
     resolveAgentForegroundProcessMock.mockReset()
     readConptyMock.mockReset()
-    readConptyMock.mockResolvedValue(null)
+    readConptyMock.mockReturnValue(null)
     previousUserDataPath = process.env.ORCA_USER_DATA_PATH
     userDataPath = mkdtempSync(join(tmpdir(), 'daemon-pty-degraded-scan-test-'))
     process.env.ORCA_USER_DATA_PATH = userDataPath
@@ -131,7 +131,7 @@ describe('daemon pty foreground degraded-scan handling', () => {
     resolveAgentForegroundProcessMock
       .mockResolvedValueOnce({ available: true, processName: 'claude' })
       .mockResolvedValue({ available: true, processName: null })
-    readConptyMock.mockResolvedValue(new Set([12345, 999])) // child still attached
+    readConptyMock.mockReturnValue(new Set([12345, 999])) // child still attached
     const { handle } = await spawnWindowsShell()
 
     await readForegroundAt(handle, 0)
@@ -143,7 +143,7 @@ describe('daemon pty foreground degraded-scan handling', () => {
     resolveAgentForegroundProcessMock
       .mockResolvedValueOnce({ available: true, processName: 'claude' })
       .mockResolvedValue({ available: true, processName: null })
-    readConptyMock.mockResolvedValue(new Set([12345]))
+    readConptyMock.mockReturnValue(new Set([12345]))
     const { handle } = await spawnWindowsShell()
 
     await readForegroundAt(handle, 0)
@@ -156,7 +156,7 @@ describe('daemon pty foreground degraded-scan handling', () => {
     resolveAgentForegroundProcessMock
       .mockResolvedValueOnce({ available: true, processName: 'claude' })
       .mockResolvedValue({ available: true, processName: null })
-    readConptyMock.mockResolvedValue(null)
+    readConptyMock.mockReturnValue(null)
     const { handle } = await spawnWindowsShell()
 
     await readForegroundAt(handle, 0)
