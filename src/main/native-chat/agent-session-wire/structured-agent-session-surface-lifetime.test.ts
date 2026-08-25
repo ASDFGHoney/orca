@@ -113,7 +113,7 @@ beforeEach(async () => {
       }
     }
   })
-  closeSession = vi.fn(async () => undefined)
+  closeSession = vi.fn(async () => true)
   store = await AgentSessionRecordStore.open({ directory: join(root, 'store'), hostId: 'local' })
   openHost()
 })

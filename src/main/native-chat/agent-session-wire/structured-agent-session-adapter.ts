@@ -115,5 +115,6 @@ export type StructuredAgentSessionAdapter = {
    *  resolver discover it from the provider session id. */
   historyFilePath?(input: { identity: AgentSessionJournalIdentity }): Promise<string | null>
   /** Gracefully stops the structured owner after its event stream is drained. */
-  closeSession?(sessionId: string): Promise<void | boolean>
+  /** Returns true only after the provider child exit is proven. */
+  closeSession?(sessionId: string): Promise<boolean>
 }

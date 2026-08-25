@@ -43,9 +43,11 @@ export const STRUCTURED_AGENT_SESSION_EVICTION_STEPS: readonly StructuredAgentSe
       name: 'stop-provider-child',
       run: async (context) => {
         // An adapter with no close has nothing to stop; anything else must PROVE the exit.
-        const stopped = await context.adapter.closeSession?.(context.sessionId)
-        if (stopped === false) {
-          throw new Error('provider child exit was not proven')
+        if (context.adapter.closeSession) {
+          const stopped = await context.adapter.closeSession(context.sessionId)
+          if (stopped !== true) {
+            throw new Error('provider child exit was not proven')
+          }
         }
       }
     },

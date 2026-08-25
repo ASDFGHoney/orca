@@ -31,6 +31,7 @@ import { createClaudeSessionJournalTranslator } from './claude-structured-journa
 import {
   cancelClaudeAcquisitionAttempt,
   ClaudeAcquisitionRegistry,
+  closeClaudeSessionsUntilStopped,
   type ClaudeAcquisitionAttempt,
   type ClaudeSession,
   type ClaudeStructuredSessionAdapterDeps,
@@ -282,18 +283,16 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
 
   readOptions = (input: { sessionId: string; fence: number }) =>
     readClaudeStructuredSessionOptions(this.session(input.sessionId), this.deps.requestTimeoutMs)
-
   releaseAcquisition(input: { sessionId: string }): Promise<void> {
     return this.closeSession(input.sessionId).then(() => undefined)
   }
 
-  async closeSession(sessionId: string): Promise<void | boolean> {
+  async closeSession(sessionId: string): Promise<boolean> {
     if (!(await cancelClaudeAcquisitionAttempt(this.acquisitions.get(sessionId)))) {
       return false
     }
     return this.closePublishedSession(sessionId)
   }
-
   private closePublishedSession(sessionId: string): Promise<boolean> {
     return closeClaudePublishedSession({
       sessions: this.sessions,
@@ -302,15 +301,14 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       ...(this.deps.onEvent ? { onEvent: this.deps.onEvent } : {})
     })
   }
-
   async closeAll(): Promise<void> {
     this.acquisitions.close()
-    while (this.sessions.size > 0 || this.acquisitions.size > 0) {
-      const ids = new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()])
-      await Promise.all([...ids].map((sessionId) => this.closeSession(sessionId)))
-    }
+    await closeClaudeSessionsUntilStopped(
+      () => this.sessions.size > 0 || this.acquisitions.size > 0,
+      () => new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()]),
+      (sessionId) => this.closeSession(sessionId)
+    )
   }
-
   private session(sessionId: string): ClaudeSession {
     const session = this.sessions.get(sessionId)
     if (!session) {

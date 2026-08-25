@@ -715,4 +715,14 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
     await expect(adapter.closeSession('session-1')).resolves.toBe(false)
     expect(claude.connections[0].closeCount).toBe(2)
   })
+
+  it('bounds shutdown when a provider child never proves exit', async () => {
+    const claude = fakeClaude({ closeResult: false })
+    const adapter = await acquired(claude)
+
+    await expect(adapter.closeAll()).rejects.toThrow(
+      'claude structured session shutdown could not prove every child stopped'
+    )
+    expect(claude.connections[0].closeCount).toBe(3)
+  })
 })

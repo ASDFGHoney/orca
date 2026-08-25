@@ -186,3 +186,9 @@ The structural audit still has an unresolved platform finding: `agent-session-pr
 - A structural review sampled 200 real local Claude transcripts. The latest `last-prompt.leafUuid` matched neither a simple latest root-user UUID nor a stable frame namespace (observed marker records included assistant, user, system, and attachment rows).
 - Therefore, treating a root-user frame as the durable Claude leaf is not sufficient, and dropping leaf checks in favor of session-id-only identity would permit silent sibling-branch adoption under concurrent resumes.
 - The required proof is still unresolved: close/reproof must use the provider's authoritative transcript marker and prove continuity/ancestry from the persisted branch before accepting a new leaf. This is a Claude release blocker until covered by real-transport tests and a signed-in cycle.
+
+## Codex/Claude close-proof failure matrix (2026-08-24)
+
+- The provider adapter contract now requires `closeSession()` to return explicit `true` exit proof. The router, native handoff, and eviction paths fail closed for `false` or an unknown result, retaining ownership for a retry rather than launching a second writer.
+- Codex and Claude `closeAll()` shutdown is bounded to three attempts and reports manual-recovery failure if a child remains indexed, preventing an unbounded shutdown loop when provider exit cannot be proven.
+- Focused Codex/router/eviction/handoff suites pass (73 tests); Node and web typechecks pass after the runtime narrowing fix. The full Claude adapter suite still has one pre-existing failure while the in-progress leaf refactor drops the expected persisted `prompt-leaf` to `null`; this remains a Claude identity blocker, not a release-ready result.

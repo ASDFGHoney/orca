@@ -40,7 +40,7 @@ let activeEffort: string | null
 let transcriptPath: string
 let optionFailure: Error | null
 /** What the adapter's closeSession reports about the child's exit. */
-let closeSessionExit: boolean | undefined
+let closeSessionExit = true
 const dispatchedModels: string[] = []
 const launchedOptions: (Readonly<Record<string, string>> | undefined)[] = []
 const closedTuiOwners: StructuredTuiOwner[] = []
@@ -171,7 +171,7 @@ beforeEach(async () => {
   activeModel = DEFAULT_MODEL
   activeEffort = null
   optionFailure = null
-  closeSessionExit = undefined
+  closeSessionExit = true
   dispatchedModels.length = 0
   launchedOptions.length = 0
   closedTuiOwners.length = 0

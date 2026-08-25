@@ -63,7 +63,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'orca-hold-wire-'))
   resetHostTestOperationIds()
   requests = 0
-  closeSession = vi.fn(async () => undefined)
+  closeSession = vi.fn(async () => true)
   store = await AgentSessionRecordStore.open({ directory: join(root, 'store'), hostId: 'local' })
   host = new StructuredAgentSessionHost({
     store,

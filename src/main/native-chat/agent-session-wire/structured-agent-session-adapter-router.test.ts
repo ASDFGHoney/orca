@@ -62,4 +62,20 @@ describe('StructuredAgentSessionAdapterRouter.closeSession', () => {
     await router.acquire({ identity: identity('codex'), fence: 1, spawnToken: 'spawn-codex' })
     await expect(router.closeSession('codex-session')).resolves.toBe(false)
   })
+
+  it('refuses an adapter that does not return explicit exit proof', async () => {
+    const closeUnknown = vi.fn(async () => undefined) as unknown as NonNullable<
+      StructuredAgentSessionAdapter['closeSession']
+    >
+    const router = new StructuredAgentSessionAdapterRouter(
+      { codex: adapter(closeUnknown), claude: adapter() },
+      async () => undefined
+    )
+
+    await router.acquire({ identity: identity('codex'), fence: 1, spawnToken: 'spawn-codex' })
+    await expect(router.closeSession('codex-session')).resolves.toBe(false)
+    // The owner remains routed so a later retry can reach the still-live child.
+    await expect(router.closeSession('codex-session')).resolves.toBe(false)
+    expect(closeUnknown).toHaveBeenCalledTimes(2)
+  })
 })

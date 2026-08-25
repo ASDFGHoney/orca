@@ -135,3 +135,16 @@ export async function cancelCodexAcquisitionAttempt(
   await attempt.finished
   return true
 }
+
+export async function closeCodexSessionsUntilStopped(
+  hasSessions: () => boolean,
+  sessionIds: () => Iterable<string>,
+  close: (sessionId: string) => Promise<boolean>
+): Promise<void> {
+  for (let attempt = 0; attempt < 3 && hasSessions(); attempt += 1) {
+    await Promise.all([...sessionIds()].map((sessionId) => close(sessionId)))
+  }
+  if (hasSessions()) {
+    throw new Error('codex structured session shutdown could not prove every child stopped')
+  }
+}

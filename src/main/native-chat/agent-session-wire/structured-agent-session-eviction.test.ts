@@ -22,6 +22,7 @@ function context(): StructuredAgentSessionEvictionContext & { order: string[] } 
     adapter: {
       closeSession: vi.fn(async () => {
         order.push('closeSession')
+        return true
       })
     } as unknown as StructuredAgentSessionEvictionContext['adapter'],
     forget: vi.fn(() => order.push('forget')),
@@ -85,6 +86,7 @@ describe('rows the provider emits while closing', () => {
         closeSession: async () => {
           // What codex-structured-session-close does on its way out.
           sink.sink.publish()
+          return true
         }
       } as never,
       forget: () => {},
@@ -135,7 +137,7 @@ describe('eviction against the real sink cache', () => {
     await evictStructuredAgentSession({
       sessionId,
       eventSink: state.eventSinkFor(sessionId),
-      adapter: { closeSession: async () => {} } as never,
+      adapter: { closeSession: async () => true } as never,
       forget: () => {},
       discardSink: () => state.discardEventSink(sessionId),
       releaseLease: async () => {}

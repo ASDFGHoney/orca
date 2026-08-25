@@ -162,3 +162,16 @@ export async function cancelClaudeAcquisitionAttempt(
   await attempt.finished
   return true
 }
+
+export async function closeClaudeSessionsUntilStopped(
+  hasSessions: () => boolean,
+  sessionIds: () => Iterable<string>,
+  close: (sessionId: string) => Promise<boolean>
+): Promise<void> {
+  for (let attempt = 0; attempt < 3 && hasSessions(); attempt += 1) {
+    await Promise.all([...sessionIds()].map((sessionId) => close(sessionId)))
+  }
+  if (hasSessions()) {
+    throw new Error('claude structured session shutdown could not prove every child stopped')
+  }
+}

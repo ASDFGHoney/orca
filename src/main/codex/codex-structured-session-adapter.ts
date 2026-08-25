@@ -28,6 +28,7 @@ import {
 import {
   cancelCodexAcquisitionAttempt,
   CodexAcquisitionRegistry,
+  closeCodexSessionsUntilStopped,
   type CodexAcquisitionAttempt,
   type CodexSession,
   type CodexStructuredSessionAdapterDeps,
@@ -297,21 +298,20 @@ export class CodexStructuredSessionAdapter implements StructuredAgentSessionAdap
 
   /** Reaps one session's child. The proven handle chain is already durable, so
    *  a graceful close loses nothing. */
-  async closeSession(sessionId: string): Promise<void | boolean> {
+  async closeSession(sessionId: string): Promise<boolean> {
     if (!(await cancelCodexAcquisitionAttempt(this.acquisitions.get(sessionId)))) {
       return false
     }
     return closeCodexPublishedSession(this.sessions, sessionId, this.deps.onEvent)
   }
-
   async closeAll(): Promise<void> {
     this.acquisitions.close()
-    while (this.sessions.size > 0 || this.acquisitions.size > 0) {
-      const sessionIds = new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()])
-      await Promise.all([...sessionIds].map((sessionId) => this.closeSession(sessionId)))
-    }
+    await closeCodexSessionsUntilStopped(
+      () => this.sessions.size > 0 || this.acquisitions.size > 0,
+      () => new Set([...this.sessions.keys(), ...this.acquisitions.sessionIds()]),
+      (sessionId) => this.closeSession(sessionId)
+    )
   }
-
   releaseAcquisition = async (input: { sessionId: string }): Promise<void> => {
     await this.closeSession(input.sessionId)
   }

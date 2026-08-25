@@ -72,7 +72,7 @@ export function createStructuredAgentSessionHostHandoff(
         return false
       }
       const exited = await deps.adapter.closeSession(sessionId)
-      if (exited === false) {
+      if (exited !== true) {
         // Report the unproven exit; the forward handoff refuses on it.
         return false
       }
