@@ -11,10 +11,8 @@ import {
 } from './remote-runtime-terminal-multiplexer'
 import { replaceRuntimeEnvironmentRevisions } from './runtime-environment-revision'
 
-// Why: STA-5098. `sendFrame` gates only on socket readiness, so a stream handle whose record was
-// dropped (close on park, or a reconnect that clears the stream table) still reported success on a
-// live socket. The host drops those frames for an unknown stream id, so the caller believed input
-// was delivered while the PTY never saw a byte and never painted — the revealed cold-parked pane.
+// Why: sendFrame gates on socket readiness alone, so a dropped stream handle reported success
+// while the host discarded the frames for an unknown stream id.
 
 type SubscribeCallbacks = {
   onResponse: (response: unknown) => void

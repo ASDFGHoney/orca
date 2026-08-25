@@ -1185,8 +1185,7 @@ class RemoteRuntimeTerminalMultiplexer {
     )
   }
 
-  // Why: sendFrame only gates on socket readiness, so a handle whose stream was dropped (close or
-  // reconnect) would report success while the host drops the unknown stream id (STA-5098).
+  // Why: sendFrame gates on readiness alone; a dropped handle would still report success.
   private isRegisteredStream(stream: RemoteRuntimeMultiplexedTerminalState): boolean {
     return this.streams.get(stream.streamId) === stream
   }

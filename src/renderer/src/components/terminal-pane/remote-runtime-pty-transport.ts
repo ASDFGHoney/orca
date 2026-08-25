@@ -379,7 +379,7 @@ export function createRemoteRuntimePtyTransport(
       pendingClaimQueryReplyCount += 1
     }
   }
-  // Why: the claim is only "resolved" once its queued input actually reaches a stream; clearing the flag alone strands those bytes (STA-5098).
+  // Why: clearing the claim flag without draining strands the queued bytes.
   const flushPendingClaimInput = (stream: RemoteRuntimeMultiplexedTerminal): void => {
     const queued = pendingClaimInput
     pendingViewportClaim = false
@@ -1976,7 +1976,7 @@ export function createRemoteRuntimePtyTransport(
     ) {
       nextStream.resize(desiredViewport.cols, desiredViewport.rows)
     }
-    // Why: drain on every install, not just a still-pending claim — a live claim may have cleared the flag first (STA-5098).
+    // Why: a live claim may already have cleared the flag, so drain on every install.
     flushPendingClaimInput(nextStream)
   }
 
