@@ -150,7 +150,7 @@ async function readMainStreamingFrame(
 
 function parseStreamingFrame(content: string | null, marker: string): number | null {
   const prefix = `${marker} frame `
-  const start = content?.indexOf(prefix) ?? -1
+  const start = content?.lastIndexOf(prefix) ?? -1
   if (!content || start < 0) {
     return null
   }
@@ -233,7 +233,7 @@ test('repairs duplicate persisted PTY renderers before streaming tab reveal', as
       .toBe(restoredTabId)
     await expect
       .poll(() => readStreamingFrame(secondLaunch.page, restoredTabId, marker), {
-        timeout: 40_000,
+        timeout: 20_000,
         message: 'Revealed renderer did not catch up to hidden authoritative output'
       })
       .toBeGreaterThanOrEqual(hiddenFrame)
