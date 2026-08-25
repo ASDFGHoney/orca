@@ -563,6 +563,7 @@ describe('parseWorkspaceSession', () => {
             worktreeId: 'wt',
             contentType: 'agent-session',
             agentSessionAgent: 'codex',
+            structuredSessionId: 'codex-session-1',
             label: 'Codex Chat',
             customLabel: null,
             color: null,
@@ -578,7 +579,8 @@ describe('parseWorkspaceSession', () => {
     if (result.ok) {
       expect(result.value.unifiedTabs?.wt[0]).toMatchObject({
         contentType: 'agent-session',
-        agentSessionAgent: 'codex'
+        agentSessionAgent: 'codex',
+        structuredSessionId: 'codex-session-1'
       })
       expect(result.value.activeTabTypeByWorktree?.wt).toBe('agent-session')
     }
