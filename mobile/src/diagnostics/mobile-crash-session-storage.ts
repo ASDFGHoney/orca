@@ -122,11 +122,14 @@ function parseSnapshot(value: unknown): MobileCrashSessionSnapshot | null {
   if (typeof candidate.openedAt !== 'string' || !Array.isArray(candidate.breadcrumbs)) {
     return null
   }
-  const breadcrumbs = sanitizeCrashReportBreadcrumbs(
-    candidate.breadcrumbs as CrashReportBreadcrumb[]
+  const recentBreadcrumbs = (candidate.breadcrumbs as CrashReportBreadcrumb[]).slice(
+    -MAX_MOBILE_CRASH_BREADCRUMBS
+  )
+  const breadcrumbs = recentBreadcrumbs.flatMap(
+    (breadcrumb) => sanitizeCrashReportBreadcrumbs([breadcrumb]) ?? []
   )
   return {
     openedAt: sanitizeCrashReportString(candidate.openedAt, 80),
-    breadcrumbs: (breadcrumbs ?? []).slice(-MAX_MOBILE_CRASH_BREADCRUMBS)
+    breadcrumbs
   }
 }

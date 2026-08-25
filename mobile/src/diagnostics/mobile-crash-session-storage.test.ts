@@ -9,11 +9,15 @@ import {
 
 const OPENED_AT = '2026-08-24T18:00:00.000Z'
 
-function makeLargeBreadcrumbs(prefix: string, count: number): CrashReportBreadcrumb[] {
+function makeLargeBreadcrumbs(
+  prefix: string,
+  count: number,
+  payloadChars = 3_900
+): CrashReportBreadcrumb[] {
   return Array.from({ length: count }, (_, index) => ({
     createdAt: OPENED_AT,
     name: 'render_error_contained',
-    data: { errorStack: `${prefix}-${index}-${'x'.repeat(3_900)}` }
+    data: { errorStack: `${prefix}-${index}-${'x'.repeat(payloadChars)}` }
   }))
 }
 
@@ -42,6 +46,14 @@ describe('mobile crash session storage', () => {
     expect(serialized.length).toBeLessThanOrEqual(MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS)
   })
 
+  it('caps oversized breadcrumb arrays when reading persisted data', () => {
+    const raw = JSON.stringify(makeJournal(makeLargeBreadcrumbs('active', 40, 20)))
+    const parsed = parseMobileCrashJournal(raw)
+
+    expect(parsed?.activeSession.breadcrumbs).toHaveLength(30)
+    expect(parsed?.activeSession.breadcrumbs[0]?.data?.errorStack).toContain('active-10-')
+  })
+
   it('evicts current breadcrumbs before previous abnormal-session evidence', () => {
     const serialized = serializeMobileCrashJournal(
       makeJournal(makeLargeBreadcrumbs('active', 12), makeLargeBreadcrumbs('previous', 12))
@@ -51,5 +63,18 @@ describe('mobile crash session storage', () => {
     expect(parsed?.latestAbnormalSession?.breadcrumbs.length).toBeGreaterThan(
       parsed?.activeSession.breadcrumbs.length ?? 0
     )
+  })
+
+  it('preserves all seven previous crash breadcrumbs before trimming the live session', () => {
+    const serialized = serializeMobileCrashJournal(
+      makeJournal(
+        makeLargeBreadcrumbs('active', 7, 2_500),
+        makeLargeBreadcrumbs('previous', 7, 2_500)
+      )
+    )
+    const parsed = parseMobileCrashJournal(serialized)
+
+    expect(parsed?.latestAbnormalSession?.breadcrumbs).toHaveLength(7)
+    expect(parsed?.activeSession.breadcrumbs.length).toBeLessThan(7)
   })
 })
