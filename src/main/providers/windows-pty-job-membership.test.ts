@@ -27,7 +27,7 @@ describe('readWindowsPtyJobProcessIds', () => {
     forkMock.mockClear()
 
     for (let read = 0; read < 50; read += 1) {
-      readWindowsPtyJobProcessIds(pty(), { listJobProcessIds })
+      readWindowsPtyJobProcessIds(pty(), listJobProcessIds)
     }
 
     expect(forkMock).not.toHaveBeenCalled()
@@ -35,16 +35,14 @@ describe('readWindowsPtyJobProcessIds', () => {
   })
 
   it('reports the shell alone, which is what lets a stale agent be retired', () => {
-    const membership = readWindowsPtyJobProcessIds(pty(), { listJobProcessIds: () => [100] })
+    const membership = readWindowsPtyJobProcessIds(pty(), () => [100])
 
     expect(membership).toEqual(new Set([100]))
     expect(membership?.size).toBe(1)
   })
 
   it('reports descendants, which is what keeps a live agent cached', () => {
-    const membership = readWindowsPtyJobProcessIds(pty(), {
-      listJobProcessIds: () => [100, 200, 300]
-    })
+    const membership = readWindowsPtyJobProcessIds(pty(), () => [100, 200, 300])
 
     expect(membership?.size).toBe(3)
   })
@@ -56,13 +54,11 @@ describe('readWindowsPtyJobProcessIds', () => {
     // null is never evidence that processes died
     // (docs/reference/ssh-execution-boundary.md). An empty list means the tree
     // is gone, which this function has never been the one to report.
-    expect(readWindowsPtyJobProcessIds(pty(), { listJobProcessIds: () => pids })).toBeNull()
+    expect(readWindowsPtyJobProcessIds(pty(), () => pids)).toBeNull()
   })
 
   it('drops nonsense pids rather than trusting the whole answer', () => {
-    const membership = readWindowsPtyJobProcessIds(pty(), {
-      listJobProcessIds: () => [100, 0, -1, 1.5, 200]
-    })
+    const membership = readWindowsPtyJobProcessIds(pty(), () => [100, 0, -1, 1.5, 200])
 
     expect(membership).toEqual(new Set([100, 200]))
   })
@@ -73,9 +69,7 @@ describe('why the filter does NOT use this', () => {
     // Shell exited, a descendant is still up. Size 1 -- but reading that as
     // "the shell is alone, retire the agent" inverts the truth. The forked
     // probe this replaced required the root in the raw list; so does this.
-    const membership = readWindowsPtyJobProcessIds(pty(100), {
-      listJobProcessIds: () => [200]
-    })
+    const membership = readWindowsPtyJobProcessIds(pty(100), () => [200])
 
     expect(membership).toBeNull()
   })
@@ -88,7 +82,7 @@ describe('why the filter does NOT use this', () => {
     const listJobProcessIds = vi.fn(() => [100])
     const proc = pty(100)
 
-    readWindowsPtyJobProcessIds(proc, { listJobProcessIds })
+    readWindowsPtyJobProcessIds(proc, listJobProcessIds)
 
     expect(listJobProcessIds).toHaveBeenCalledWith(proc)
     expect(listJobProcessIds).not.toHaveBeenCalledWith(100)
@@ -106,9 +100,7 @@ describe('why the filter does NOT use this', () => {
     // vs console [69908,40980] -- the job is a superset. Harmless for the
     // `size > 1` callers, wrong for the filter.
     const detachedChild = 104068
-    const membership = readWindowsPtyJobProcessIds(pty(40980), {
-      listJobProcessIds: () => [40980, detachedChild]
-    })
+    const membership = readWindowsPtyJobProcessIds(pty(40980), () => [40980, detachedChild])
 
     expect(membership?.has(detachedChild)).toBe(true)
   })

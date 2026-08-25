@@ -123,22 +123,21 @@ export function createPtyForegroundProcessTracker(args: {
     }
     foregroundRefreshInFlight = true
     lastForegroundRefreshStartedAt = now
+    const identityOlderThan = (ms: number): boolean =>
+      cachedAgentForeground !== null && Date.now() - cachedAgentForeground.refreshedAt > ms
     const retireStaleForegroundIdentity = ({ onlyWhenAged = false } = {}): void => {
       const currentFallbackProcess = getFallbackProcess()
-      const identityAgeMs =
-        cachedAgentForeground === null ? 0 : Date.now() - cachedAgentForeground.refreshedAt
       if (
         fallbackIsShell &&
         !getActiveStartupAgent() &&
         currentFallbackProcess !== null &&
         isShellProcess(currentFallbackProcess) &&
-        (!onlyWhenAged || identityAgeMs > WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS)
+        (!onlyWhenAged || identityOlderThan(WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS))
       ) {
         cachedAgentForeground = null
         startupAgentForeground = null
       } else if (
-        cachedAgentForeground !== null &&
-        Date.now() - cachedAgentForeground.refreshedAt > FOREGROUND_AGENT_CACHE_TTL_MS &&
+        identityOlderThan(FOREGROUND_AGENT_CACHE_TTL_MS) &&
         currentFallbackProcess !== null &&
         isAgentForegroundWrapperProcess(currentFallbackProcess)
       ) {
@@ -154,19 +153,14 @@ export function createPtyForegroundProcessTracker(args: {
         }
         if (!processName || !recognizeAgentProcess(processName)) {
           if (process.platform === 'win32' && fallbackIsShell && cachedAgentForeground !== null) {
-            // Job, not console: "is anything besides the shell alive?" needs no
-            // console attachment, so it needs no forked helper (#10857).
+            // Job, not console: needs no console attachment, so no fork (#10857).
             const paneProcessIds = readWindowsPtyJobProcessIds(proc)
             // Unverifiable is never exit proof (ssh-execution-boundary.md): hold.
             if (paneProcessIds === null) {
               return
             }
-            // A superset answer is not proof of life -- a WSL pane keeps
-            // console-detached plumbing in its job, so `size > 1` stays true
-            // forever and used to veto retirement outright. That pinned a dead
-            // agent's name (#9258's bug, new mechanism) and, because a non-null
-            // cache makes idleNoEvidenceShell false, pinned the refresh at 1s
-            // and defeated the 15s idle backoff. Let age settle it instead.
+            // `size > 1` is a superset, not proof of life. Vetoing on it pinned a
+            // dead agent forever wherever a detached descendant lives; age settles it.
             retireStaleForegroundIdentity({ onlyWhenAged: paneProcessIds.size > 1 })
             return
           }

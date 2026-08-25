@@ -124,10 +124,8 @@ const pendingLocalPtySpawns = new Map<string, Set<PendingLocalPtySpawn>>()
 const ptyShellName = new Map<string, string>()
 const ptyAgentForegroundContextPaths = new Map<string, string[]>()
 // Why: remember the last recognized agent foreground so a degraded scan doesn't report the shell and look like an exit.
-const ptyLastRecognizedForeground = new Map<string, string>()
-// When each entry above was last confirmed by a scan, so job evidence -- which is
-// only a superset -- cannot keep it alive indefinitely.
-const ptyLastRecognizedForegroundAt = new Map<string, number>()
+// `at` is when a scan last confirmed it, so job evidence -- only a superset -- cannot hold it forever.
+const ptyLastRecognizedForeground = new Map<string, { name: string; at: number }>()
 const ptyTerminalHandle = new Map<string, string>()
 const ptyWorktreeId = new Map<string, string>()
 const ptyInitialCwd = new Map<string, string>()
@@ -287,7 +285,6 @@ function clearPtyState(id: string): void {
   ptyShellName.delete(id)
   ptyAgentForegroundContextPaths.delete(id)
   ptyLastRecognizedForeground.delete(id)
-  ptyLastRecognizedForegroundAt.delete(id)
   ptyTerminalHandle.delete(id)
   ptyWorktreeId.delete(id)
   ptyInitialCwd.delete(id)
@@ -1408,14 +1405,13 @@ export class LocalPtyProvider implements IPtyProvider {
     const proc = ptyProcesses.get(id)
     if (!proc) {
       ptyLastRecognizedForeground.delete(id)
-      ptyLastRecognizedForegroundAt.delete(id)
       return null
     }
     const fallbackProcess = resolveForegroundFallbackProcess(
       proc.process || null,
       ptyShellName.get(id)
     )
-    const cachedAgent = ptyLastRecognizedForeground.get(id) ?? null
+    const cachedAgent = ptyLastRecognizedForeground.get(id)?.name ?? null
     let paneMembershipUnavailable = false
     // Why: job membership preserves a live cached agent without the whole-table
     // scan (incomplete under Windows load). Job, not console: this asks "is
@@ -1430,16 +1426,15 @@ export class LocalPtyProvider implements IPtyProvider {
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
-        // Why the age bound: `size > 1` is a superset answer, not proof of life.
-        // A WSL pane keeps console-detached plumbing in its job, so this
-        // short-circuit was permanent there and the scan below -- the only path
-        // that can clear the cache -- never ran again. Fall through once stale.
-        const cachedAgentAgeMs = Date.now() - (ptyLastRecognizedForegroundAt.get(id) ?? 0)
+        // Why the age bound: `size > 1` is a superset, not proof of life, so this
+        // short-circuit was permanent wherever a detached descendant lives -- and it
+        // skips the scan below, the only path that can clear the cache.
+        const confirmedAt = ptyLastRecognizedForeground.get(id)?.at ?? 0
         if (
           paneProcessIds !== null &&
           paneProcessIds.size > 1 &&
           cachedAgent !== null &&
-          cachedAgentAgeMs <= WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS
+          Date.now() - confirmedAt <= WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS
         ) {
           return cachedAgent
         }
@@ -1461,7 +1456,7 @@ export class LocalPtyProvider implements IPtyProvider {
         return null
       }
       // Why: a degraded scan reporting shell-as-foreground fires a false "agent done"; keep last recognized agent instead.
-      const lastRecognizedAgent = ptyLastRecognizedForeground.get(id) ?? null
+      const lastRecognizedAgent = ptyLastRecognizedForeground.get(id)?.name ?? null
       const resolvedAgent = resolution.processName
         ? recognizeAgentProcessFromCommandLine(resolution.processName)
         : null
@@ -1473,14 +1468,12 @@ export class LocalPtyProvider implements IPtyProvider {
         lastRecognizedAgent
       )
       if (stable.lastRecognizedAgent) {
-        // Every confirmation restarts the clock: the bound means "time since we
-        // last saw the agent", not "how long it has run". Stamping only on a
-        // change would age out a live agent that keeps being recognized.
-        ptyLastRecognizedForegroundAt.set(id, Date.now())
-        ptyLastRecognizedForeground.set(id, stable.lastRecognizedAgent)
+        // Every confirmation restarts the clock: the bound is "time since we last
+        // saw the agent", not "how long it ran". Stamping only on a name change
+        // would expire a live agent that keeps being recognized.
+        ptyLastRecognizedForeground.set(id, { name: stable.lastRecognizedAgent, at: Date.now() })
       } else {
         ptyLastRecognizedForeground.delete(id)
-        ptyLastRecognizedForegroundAt.delete(id)
       }
       return stable.processName
     } catch {
@@ -1488,7 +1481,7 @@ export class LocalPtyProvider implements IPtyProvider {
         return null
       }
       // Why: an inspection error is a degraded read; fall back to last recognized agent (null reads as an exit).
-      return ptyLastRecognizedForeground.get(id) ?? null
+      return ptyLastRecognizedForeground.get(id)?.name ?? null
     }
   }
 
