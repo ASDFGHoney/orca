@@ -10,6 +10,7 @@ const LEGACY_PI_COMPATIBLE_TITLE_RE = /^\s*(?:[\u2800-\u28ff]\s+)?π(?:\s*[-:]|\
 // exact profile casing, since a lowercase `pi - refactor…` is ordinary prose, not a Pi title.
 // The separator must be delimited (`:` attached, or spaced) or `omp-harness` reads as a state.
 const PI_COMPATIBLE_SEPARATOR_RE = /^\s*(?:π|Pi|OMP)(?::|\s+([!>-]))(?=\s|$)/u
+const PI_COMPATIBLE_PERMISSION_TAIL_RE = /\baction required\b/i
 
 function containsBrailleSpinner(title: string): boolean {
   for (const char of title) {
@@ -78,6 +79,12 @@ export function getPiCompatibleTitleSeparatorStatus(
   const match = PI_COMPATIBLE_SEPARATOR_RE.exec(title)
   if (!match) {
     return null
+  }
+  // Why: `-` is both a state separator and the delimiter in the synthetic permission label, so
+  // `OMP - action required` would read as idle. Callers happen to resolve that label earlier,
+  // but this is exported — carry the guard here rather than depend on their ordering.
+  if (PI_COMPATIBLE_PERMISSION_TAIL_RE.test(title)) {
+    return 'permission'
   }
   return match[1] === '!' ? 'permission' : 'idle'
 }

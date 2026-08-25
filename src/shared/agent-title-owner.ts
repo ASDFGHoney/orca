@@ -156,7 +156,9 @@ export function normalizeCompatibleAgentTitleForOwner(
   // session name and cwd, which collapsing to a bare profile label threw away (#16093).
   if (isLegacyPiCompatibleTitle(source.sourceTitle)) {
     // Why scoped to the matched segment: a multiplexer prefix could itself contain the brand,
-    // and a whole-string replace would rewrite that instead of the pane's own identity.
+    // and a whole-string replace would rewrite that instead of the pane's own identity. Note the
+    // scoping is only as good as the segment match — a prefix that itself parses as a π title
+    // makes the whole string the match, and then the prefix's brand is what gets swapped.
     const ownedSegment = source.sourceTitle.replace(LEGACY_PI_BRAND, ownerProfile.workingLabel)
     const segmentAt = title.lastIndexOf(source.sourceTitle)
     return segmentAt === -1 ? ownedSegment : title.slice(0, segmentAt) + ownedSegment

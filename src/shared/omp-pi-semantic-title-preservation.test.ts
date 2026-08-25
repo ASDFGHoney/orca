@@ -26,6 +26,7 @@ import {
   shouldDriveSyntheticAgentTitleFromHook
 } from './synthetic-agent-title'
 import { normalizeCompatibleAgentTitleForOwner } from './agent-title-owner'
+import { getPiCompatibleTitleSeparatorStatus } from './pi-compatible-synthetic-title'
 
 // Verbatim from src/main/pi/titlebar-extension-source.ts:44 and oh-my-pi:530-544.
 const ORCA_EXTENSION_WORKING = (frame: string): string => `${frame} π - fixing the sidebar - orca`
@@ -219,5 +220,33 @@ describe('one real OMP turn', () => {
     }
 
     expect(committed).toEqual(['⠋ π - fixing the sidebar - orca', 'π - fixing the sidebar - orca'])
+  })
+})
+
+describe('latent hazards the reviewers flagged', () => {
+  // Why: `-` is both a state separator and the permission label's delimiter. This resolves
+  // correctly today only because the synthetic check runs first in detectAgentStatusFromTitle,
+  // and the separator fn is exported — so pin both the caller and the fn itself.
+  it.each(['Pi - action required', 'OMP - action required'])(
+    'classifies %s as permission, not idle',
+    (title) => {
+      expect(detectAgentStatusFromTitle(title)).toBe('permission')
+      expect(getPiCompatibleTitleSeparatorStatus(title)).toBe('permission')
+    }
+  )
+
+  // Why: the owner rewrite re-runs on its own output during hydration and seeding. It is a fixed
+  // point only because getAgentLabel does not tokenize `omp`/`pi`; if that ever changes, a
+  // rewritten title would collapse back to a bare label and lose the session text again.
+  it.each([
+    '⠋ π - fixing the sidebar - orca',
+    'π - fixing the sidebar - orca',
+    'π ! fixing the sidebar',
+    'π ⠙ fixing the sidebar',
+    'zsh | ⠙ π - a - b'
+  ])('is a fixed point when the owner rewrite re-runs on %s', (title) => {
+    const once = normalizeCompatibleAgentTitleForOwner(title, 'omp')
+    expect(normalizeCompatibleAgentTitleForOwner(once, 'omp')).toBe(once)
+    expect(once).toContain('OMP')
   })
 })
