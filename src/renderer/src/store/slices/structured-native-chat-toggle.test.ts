@@ -208,6 +208,7 @@ describe('native chat routing', () => {
     expect(tab).toMatchObject({ structuredSessionId: 'codex_thread-codex' })
     expect(patch).toHaveBeenLastCalledWith(tab.id, {
       structuredSessionId: 'codex_thread-codex',
+      agentSessionAgent: 'codex',
       viewMode: 'chat'
     })
   })
@@ -277,6 +278,46 @@ describe('native chat routing', () => {
     expect(mockToastError).toHaveBeenCalledWith(
       'Could not return this Codex session to the terminal',
       { description: 'history unavailable' }
+    )
+  })
+
+  it('rolls an adopted terminal back into view when chat handoff fails', async () => {
+    const { tab, state } = terminalState({})
+    const patch = vi.fn((tabId: string, next: Record<string, unknown>) => {
+      if (tabId === tab.id) {
+        Object.assign(tab, next)
+      }
+    })
+    vi.mocked(callStructuredAgentSession).mockImplementation(async (_target, method) => {
+      if (method === 'agentSession.adoptTerminal') {
+        return { ok: true, fence: 1 } as never
+      }
+      if (method === 'agentSession.handoffStatus') {
+        return { owner: 'tui', direction: null, phase: 'idle' } as never
+      }
+      if (method === 'agentSession.handoff') {
+        throw new Error('native proof unavailable')
+      }
+      throw new Error(`Unexpected method: ${method}`)
+    })
+
+    await expect(
+      setTerminalNativeChatMode({
+        getState: () => state as never,
+        patch,
+        tabId: tab.id,
+        mode: 'chat'
+      })
+    ).resolves.toBe('ignored')
+
+    expect(tab).toMatchObject({
+      structuredSessionId: 'codex_thread-codex',
+      viewMode: 'terminal'
+    })
+    expect(patch).toHaveBeenLastCalledWith(tab.id, { viewMode: 'terminal' })
+    expect(mockToastError).toHaveBeenCalledWith(
+      'Could not switch this Codex session to structured chat',
+      { description: 'native proof unavailable' }
     )
   })
 

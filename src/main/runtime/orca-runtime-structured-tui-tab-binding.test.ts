@@ -804,9 +804,18 @@ describe('structured TUI launch tab binding', () => {
     pty.launchToken = null
     const persistedRecord = {
       sessionId: 'session-1',
+      accountHome: { variable: 'CODEX_HOME', path: '/tmp/codex-home' },
       providerHandleChain: [{ handle: { provider: 'codex', threadId: 'thread-1' }, observedAt: 1 }],
       lease: { ownerProcess: owner.process, provenHandleLinkId: owner.link.linkId }
     } as never
+
+    resolvePinnedCodexRolloutProof.mockResolvedValueOnce('/tmp/recovered-rollout.jsonl')
+    const recoveredPath = await transport.reproveTuiOwner({
+      record: persistedRecord,
+      owner: { ...owner, transcriptPath: undefined }
+    })
+    expect(recoveredPath.transcriptPath).toBe('/tmp/recovered-rollout.jsonl')
+    expect(resolvePinnedCodexRolloutProof).toHaveBeenCalledWith('/tmp/codex-home', 'thread-1')
 
     const rebound = await transport.reproveTuiOwner({ record: persistedRecord, owner })
     expect(rebound.terminal).toMatchObject({

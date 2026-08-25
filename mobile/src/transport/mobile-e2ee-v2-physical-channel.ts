@@ -3,6 +3,7 @@ import {
   type WsOutboundBackpressureQueue
 } from '../../../src/shared/ws-outbound-backpressure-queue'
 import {
+  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
 } from '../../../src/shared/protocol-version'
@@ -122,7 +123,8 @@ export class MobileE2EEV2PhysicalChannel {
           v: 1,
           clientCapabilities: [
             STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
-            STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY
+            STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY,
+            CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
           ]
         })
       })

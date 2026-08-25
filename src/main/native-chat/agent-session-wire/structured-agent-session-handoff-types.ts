@@ -83,6 +83,12 @@ export type StructuredAgentSessionHandoffDeps = {
   publish: (sessionId: string, status: AgentSessionHandoffStatus) => void
   schedule: (sessionId: string, task: () => Promise<void>) => Promise<void>
   now: () => number
+  /** Persist a provider handle observed while re-proving a TUI owner. */
+  persistTuiProviderHandle?: (input: {
+    sessionId: string
+    link: AgentSessionProviderHandleLink
+    now: number
+  }) => Promise<void>
 }
 
 export type StructuredAgentSessionHandoffFlowContext = {

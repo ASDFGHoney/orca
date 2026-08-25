@@ -185,6 +185,11 @@ async function install(deps: StructuredAgentSessionRuntimeDeps): Promise<Install
         : {}),
       onEventSinkError: ({ sessionId, error }) =>
         deps.onError?.({ scope: `structured-agent-session-journal:${sessionId}`, error }),
+      persistTuiProviderHandle: async ({ sessionId, link, now }) => {
+        await store.transitionHandoff(sessionId, (record) =>
+          recordAgentSessionProviderHandle({ record, fence: record.lease.runtimeFence, link, now })
+        )
+      },
       ...(deps.handoffTransport ? { handoffTransport: deps.handoffTransport } : {})
     })
     setStructuredAgentSessionHost(host)

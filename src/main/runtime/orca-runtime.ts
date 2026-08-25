@@ -10865,7 +10865,37 @@ export class OrcaRuntimeService {
         ) {
           throw new Error('agent_session_identity_required')
         }
-        return current
+        if (current.link.handle.provider === 'claude' && head.handle.provider === 'claude') {
+          const proof = await this.waitForStructuredClaudeTuiProof({
+            handle: current.terminal.handle,
+            paneKey: current.terminal.paneKey,
+            sessionId: head.handle.sessionId,
+            projectsDir: join(record.accountHome.path, 'projects')
+          })
+          return {
+            ...current,
+            link: claudeProviderHandleLink({
+              sessionId: head.handle.sessionId,
+              leafUuid: proof.leafUuid,
+              resumed: true,
+              fence: record.lease.runtimeFence,
+              observedAt: Date.now()
+            }),
+            transcriptPath: proof.transcriptPath
+          }
+        }
+        if (current.transcriptPath || current.link.handle.provider !== 'codex') {
+          return current
+        }
+        if (head.handle.provider !== 'codex') {
+          return current
+        }
+        const threadId = head.handle.threadId
+        const transcriptPath = await resolvePinnedCodexRolloutProof(
+          record.accountHome.path,
+          threadId
+        )
+        return transcriptPath ? { ...current, transcriptPath } : current
       },
       recoverTuiOwner: async (record) => {
         const identity = record.lease.ownerProcess
@@ -11024,8 +11054,7 @@ export class OrcaRuntimeService {
                 handle,
                 paneKey: candidate.paneKey,
                 sessionId: head.handle.sessionId,
-                projectsDir: join(record.accountHome.path, 'projects'),
-                expectedLeafUuid: head.handle.leafUuid
+                projectsDir: join(record.accountHome.path, 'projects')
               })
         return {
           terminal: {

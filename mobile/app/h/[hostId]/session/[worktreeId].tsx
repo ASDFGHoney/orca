@@ -23,6 +23,7 @@ import * as Clipboard from 'expo-clipboard'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import type { StructuredAgent } from '../../../../../src/shared/structured-agent-session-mutation'
 import {
   AlertTriangle,
   ArrowUp,
@@ -2227,12 +2228,12 @@ export default function SessionScreen() {
       ((repoResponse as RpcSuccess).result as { repos?: RuntimeRepoSummary[] }).repos ?? []
     return repos.find((repo) => repo.id === repoId)?.connectionId?.trim() || null
   }, [client, isFloatingWorkspaceRoute, worktreeId])
-  const structuredAgent =
+  const structuredAgent: StructuredAgent =
     activeSessionTab?.type === 'agent-session'
       ? activeSessionTab.agent
-      : (createTabAgentOptions.find(
-          (option) => option.agent === 'codex' || option.agent === 'claude'
-        )?.agent ?? 'codex')
+      : createTabAgentOptions.find((option) => option.agent === 'claude')?.agent === 'claude'
+        ? 'claude'
+        : 'codex'
   const structuredSessionEntry = useMobileStructuredSessionEntry({
     client,
     connected: connState === 'connected',

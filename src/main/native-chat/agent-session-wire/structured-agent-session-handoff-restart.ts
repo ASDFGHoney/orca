@@ -1,32 +1,22 @@
-import { randomUUID } from 'node:crypto'
 import type { AgentSessionRecord } from '../../../shared/agent-session-record'
-import type {
-  AgentSessionHandoffRequest,
-  AgentSessionHandoffStatus
-} from '../../../shared/agent-session-wire'
-import { createStructuredAgentSessionOperationId } from '../../../shared/structured-agent-session-mutation'
+import type { AgentSessionHandoffRequest } from '../../../shared/agent-session-wire'
 import {
   abandonStoredAgentSessionHandoffAttempt,
   setStoredAgentSessionHandoffStage,
-  stopStoredAgentSessionOwnerForHandoff,
-  stopStoredRecoveringTuiOwnerForHandoff
+  stopStoredAgentSessionOwnerForHandoff
 } from '../../runtime/agent-session-handoff-record-transitions'
 import { handoffStructuredSessionToTui } from './structured-agent-session-handoff-forward'
 import { handoffStructuredSessionToNative } from './structured-agent-session-handoff-reverse'
 import { idleStructuredHandoffStatus } from './structured-agent-session-handoff-status'
-import type {
-  StructuredAgentSessionHandoffDeps,
-  StructuredAgentSessionHandoffFlowContext,
-  StructuredTuiOwner
-} from './structured-agent-session-handoff-types'
+import type { StructuredTuiOwner } from './structured-agent-session-handoff-types'
+import {
+  persistReprovedTuiOwner,
+  recoverTuiOwnerOrContinue,
+  recoverUnavailableTuiAsNative,
+  type StructuredAgentSessionRestartAccess
+} from './structured-agent-session-handoff-restart-tui'
 
-type RestartAccess = {
-  deps: StructuredAgentSessionHandoffDeps
-  requireRecord: (sessionId: string) => AgentSessionRecord
-  flowContext: () => StructuredAgentSessionHandoffFlowContext
-  retainOwner: (sessionId: string, owner: StructuredTuiOwner) => void
-  setStatus: (sessionId: string, status: AgentSessionHandoffStatus) => void
-}
+type RestartAccess = StructuredAgentSessionRestartAccess
 
 export async function restoreStructuredAgentSessionHandoff(
   input: RestartAccess,
@@ -141,21 +131,6 @@ async function restoreOnce(input: RestartAccess, record: AgentSessionRecord): Pr
   }
 }
 
-async function recoverUnavailableTuiAsNative(
-  input: RestartAccess,
-  record: AgentSessionRecord
-): Promise<void> {
-  await input.deps.transport!.stopRecoveredOwner(record)
-  const operationId = createStructuredAgentSessionOperationId(randomUUID, input.deps.now())
-  const stopped = await stopStoredRecoveringTuiOwnerForHandoff(input.deps.store, {
-    sessionId: record.sessionId,
-    expectedFence: record.lease.runtimeFence,
-    operationId,
-    now: input.deps.now()
-  })
-  await continueHandoff(input, stopped)
-}
-
 export function canRestoreLiveTuiOwner(record: AgentSessionRecord): boolean {
   return (
     (record.lease.handoffStage === 'recovering' ||
@@ -178,12 +153,13 @@ async function restoreRecoverableLiveTui(
   try {
     const recovered = await input.deps.transport.recoverTuiOwner(record)
     owner = await input.deps.transport.reproveTuiOwner({ record, owner: recovered })
+    await persistReprovedTuiOwner(input, record.sessionId, owner)
   } catch (error) {
     const ownerState = await input.deps.transport.probeRecoveredOwner?.(record)
     if (ownerState !== 'dead') {
       throw error
     }
-    await recoverUnavailableTuiAsNative(input, record)
+    await recoverUnavailableTuiAsNative(input, record, continueHandoff)
     return
   }
   await setStoredAgentSessionHandoffStage(input.deps.store, {
@@ -208,6 +184,7 @@ async function restoreRecoverableLiveTui(
 
 async function restoreLiveTui(input: RestartAccess, record: AgentSessionRecord): Promise<void> {
   const owner = await input.deps.transport!.recoverTuiOwner(record)
+  await persistReprovedTuiOwner(input, record.sessionId, owner)
   input.retainOwner(record.sessionId, owner)
   await startRecoveredTuiCatchup(input, record)
   input.setStatus(record.sessionId, {
@@ -223,8 +200,10 @@ async function restoreLiveTui(input: RestartAccess, record: AgentSessionRecord):
 
 async function restorePreparing(input: RestartAccess, record: AgentSessionRecord): Promise<void> {
   if (record.lease.runtimeKind === 'tui') {
-    const owner = await input.deps.transport!.recoverTuiOwner(record)
-    await input.deps.transport!.reproveTuiOwner({ record, owner })
+    const owner = await recoverTuiOwnerOrContinue(input, record, continueHandoff)
+    if (!owner) {
+      return
+    }
     const settled = await setStoredAgentSessionHandoffStage(input.deps.store, {
       sessionId: record.sessionId,
       fence: record.lease.runtimeFence,
@@ -248,8 +227,10 @@ async function restorePreparing(input: RestartAccess, record: AgentSessionRecord
 async function restoreProving(input: RestartAccess, record: AgentSessionRecord): Promise<void> {
   const operationId = record.lease.handoffOperationId!
   if (record.lease.runtimeKind === 'tui') {
-    const owner = await input.deps.transport!.recoverTuiOwner(record)
-    const reproved = await input.deps.transport!.reproveTuiOwner({ record, owner })
+    const reproved = await recoverTuiOwnerOrContinue(input, record, continueHandoff)
+    if (!reproved) {
+      return
+    }
     await input.deps.store.proveOwner({
       sessionId: record.sessionId,
       fence: record.lease.runtimeFence,

@@ -205,9 +205,9 @@ export async function setTerminalNativeChatMode(input: {
     return 'bridge'
   }
   pendingTabs.add(tab.id)
+  let sessionId: string | undefined = tab.structuredSessionId
   try {
     const provider = facts.agent === 'claude' ? 'claude' : 'codex'
-    let sessionId = tab.structuredSessionId
     let fence: number
     if (!sessionId) {
       if (!facts.paneKey || !facts.ptyId) {
@@ -249,7 +249,7 @@ export async function setTerminalNativeChatMode(input: {
         throw new Error(adopted.refusal.message)
       }
       // Keep the durable binding retryable if the following ownership transfer fails.
-      input.patch(tab.id, { structuredSessionId: sessionId })
+      input.patch(tab.id, { structuredSessionId: sessionId, agentSessionAgent: provider })
       fence = adopted.fence
     } else {
       fence = await currentFence(sessionId)
@@ -267,13 +267,23 @@ export async function setTerminalNativeChatMode(input: {
     const status = await waitForOwner(sessionId, input.mode === 'chat' ? 'native' : 'tui', provider)
     if (status.phase === 'failed') {
       throw new Error(
-        status.error?.message ??
+        status.error?.details ??
+          status.error?.message ??
           `${facts.agent === 'claude' ? 'Claude' : 'Codex'} ownership transfer failed.`
       )
     }
-    input.patch(tab.id, { structuredSessionId: sessionId, viewMode: input.mode })
+    input.patch(tab.id, {
+      structuredSessionId: sessionId,
+      agentSessionAgent: provider,
+      viewMode: input.mode
+    })
     return 'structured'
   } catch (error) {
+    // Adoption binds the durable session before the owner transfer starts. If the
+    // transfer is refused, keep that binding retryable but reveal the live TUI again.
+    if (input.mode === 'chat' && sessionId) {
+      input.patch(tab.id, { viewMode: 'terminal' })
+    }
     const agentLabel = facts.agent === 'claude' ? 'Claude' : 'Codex'
     toast.error(
       facts.agent === 'claude'

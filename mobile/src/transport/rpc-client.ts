@@ -47,6 +47,7 @@ import {
 import { isStaleForegroundDial } from './rpc-stale-dial'
 import { websocketPayloadToUint8 } from './websocket-payload-bytes'
 import {
+  CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY,
   STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
 } from '../../../src/shared/protocol-version'
@@ -379,7 +380,8 @@ export function connect(
               deviceToken,
               clientCapabilities: [
                 STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY,
-                STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY
+                STRUCTURED_AGENT_SESSION_HOLD_RUNTIME_CAPABILITY,
+                CLAUDE_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
               ]
             })
             return

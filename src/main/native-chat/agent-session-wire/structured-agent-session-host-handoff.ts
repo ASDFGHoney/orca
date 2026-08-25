@@ -91,7 +91,10 @@ export function createStructuredAgentSessionHostHandoff(
       host.subscribers.handoff(sessionId, fence, status)
     },
     schedule: host.serialize,
-    now: host.now
+    now: host.now,
+    ...(deps.persistTuiProviderHandle
+      ? { persistTuiProviderHandle: deps.persistTuiProviderHandle }
+      : {})
   })
   return Object.assign(coordinator, {
     stopTuiHistoryCatchup: () => tuiHistoryCatchup.stopAll(),

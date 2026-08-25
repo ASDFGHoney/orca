@@ -1,4 +1,5 @@
 import type { AgentSessionOwnerProbe } from '../../../shared/agent-session-lease-adjudication'
+import type { AgentSessionProviderHandleLink } from '../../../shared/agent-session-provider-handle'
 import type { AgentSessionRecord } from '../../../shared/agent-session-record'
 import type { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
 import type { AgentSessionSpawnTokenScan } from '../../runtime/agent-session-spawn-token-process-scan'
@@ -40,6 +41,11 @@ export type StructuredAgentSessionHostDeps = {
     provider: AgentSessionRecord['provider']
   ) => Promise<Record<string, string> | undefined> | Record<string, string> | undefined
   now?: () => number
+  persistTuiProviderHandle?: (input: {
+    sessionId: string
+    link: AgentSessionProviderHandleLink
+    now: number
+  }) => Promise<void>
   /** How long a session outlives its last surface. Tests drive this; production takes the default. */
   releaseGraceMs?: number
   onEventSinkError?: (input: { sessionId: string; error: unknown }) => void

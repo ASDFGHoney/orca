@@ -2,7 +2,7 @@ import type { RpcClient } from '../transport/rpc-client'
 import type { RpcResponse, RpcSuccess } from '../transport/types'
 import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import { waitForRpcClientReconnected } from '../transport/rpc-client-reconnect-wait'
-import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
+import { isLogicalClientCutoverError } from '../transport/logical-client-cutover-error'
 import {
   CLIENT_WORKTREE_CREATE_MAX_ATTEMPTS,
   getClientWorktreeCreateCandidate,

@@ -522,6 +522,11 @@ function TerminalPane(
     (store) =>
       getCachedUnifiedTerminalTabForWorktree(store.unifiedTabsByWorktree, worktreeId, tabId)?.id
   )
+  const structuredSessionAgent = useAppStore(
+    (store) =>
+      getCachedUnifiedTerminalTabForWorktree(store.unifiedTabsByWorktree, worktreeId, tabId)
+        ?.agentSessionAgent
+  )
   const isChatViewMode = useAppStore(
     (store) =>
       getCachedUnifiedTerminalTabForWorktree(store.unifiedTabsByWorktree, worktreeId, tabId)
@@ -3010,6 +3015,8 @@ function TerminalPane(
     leafId: chatPane?.leafId ?? null,
     leafIds: getNativeChatLeafIds()
   })
+  const structuredChatAgent = structuredSessionAgent ?? chatPaneResolvedAgent ?? chatPaneLaunchAgent
+  const structuredChatTarget = useMemo(() => ({ kind: 'local' as const }), [])
   const activePaneIsChatLeaf = Boolean(
     isChatViewMode && activePane?.leafId && activePane.leafId === chatLeafId
   )
@@ -3169,14 +3176,14 @@ function TerminalPane(
       {effectiveChatViewMode && chatPane?.container
         ? createPortal(
             <div className="native-chat-pane-shell absolute inset-0 z-10 flex min-h-0 min-w-0 bg-background">
-              {structuredSessionId ? (
+              {structuredSessionId && structuredChatAgent ? (
                 <NativeChatView
                   mode="structured"
                   tabId={unifiedTabId ?? tabId}
                   sessionId={structuredSessionId}
-                  agent="codex"
+                  agent={structuredChatAgent}
                   isVisible={isRendererVisible}
-                  target={{ kind: 'local' }}
+                  target={structuredChatTarget}
                   allowFileUriLinks
                   orchestrationDispatchStatus={chatPaneDispatchStatus}
                   onSwitchToTerminal={switchNativeChatToTerminal}

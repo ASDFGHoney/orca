@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
 import { markRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
-import { LogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
+import { LogicalClientCutoverError } from '../transport/logical-client-cutover-error'
 import type { ConnectionState } from '../transport/types'
 import { WORKTREE_CREATE_DEDUPE_TTL_MS } from '../../../src/shared/new-workspace/worktree-create-retry-policy'
 import {

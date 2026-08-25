@@ -61,6 +61,23 @@ export function resolveClaudeReplayWaiter(
   ) {
     return
   }
+  const body = message.message
+  if (typeof body !== 'object' || body === null) {
+    return
+  }
+  const content = (body as { content?: unknown }).content
+  if (
+    Array.isArray(content) &&
+    content.length > 0 &&
+    content.every(
+      (block) =>
+        typeof block === 'object' &&
+        block !== null &&
+        (block as { type?: unknown }).type === 'tool_result'
+    )
+  ) {
+    return
+  }
   const uuid = readClaudeFrameString(message, 'uuid')
   const waiter = uuid ? session.dispatchWaiters.shift() : undefined
   if (waiter && uuid) {

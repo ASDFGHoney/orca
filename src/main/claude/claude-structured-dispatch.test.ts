@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentJournalMessageItem } from '../../shared/agent-session-journal-types'
-import { dispatchClaudeTurn } from './claude-structured-dispatch'
+import { dispatchClaudeTurn, resolveClaudeReplayWaiter } from './claude-structured-dispatch'
 import type { ClaudeSession } from './claude-structured-session-state'
 
 function sessionFor(send = vi.fn().mockResolvedValue(undefined)): ClaudeSession {
@@ -26,6 +26,28 @@ function userMessage(blocks: AgentJournalMessageItem['blocks']): AgentJournalMes
 }
 
 describe('Claude structured dispatch image limits', () => {
+  it('does not consume a replay waiter on a tool-result user frame', () => {
+    const session = sessionFor()
+    const resolve = vi.fn()
+    const timer = setTimeout(() => undefined, 10_000)
+    session.dispatchWaiters.push({ resolve, timer })
+
+    resolveClaudeReplayWaiter(session, {
+      type: 'user',
+      session_id: 'provider-session',
+      uuid: 'tool-result-uuid',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'done' }]
+      }
+    })
+
+    expect(resolve).not.toHaveBeenCalled()
+    expect(session.dispatchWaiters).toHaveLength(1)
+    clearTimeout(timer)
+  })
+
   it('rejects more than twenty URL images before sending', async () => {
     const session = sessionFor()
     const body = userMessage(
