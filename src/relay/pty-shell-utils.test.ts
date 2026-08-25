@@ -45,7 +45,7 @@ function mockWindowsProcessTable(
   rows: { pid: number; ppid: number; name: string; commandLine?: string }[]
 ): void {
   __setWindowsProcessTreeLoaderForTests(() => ({
-    ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+    ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
     getAllProcesses: (cb: (value: typeof rows | undefined) => void) =>
       cb([{ pid: process.pid, ppid: 0, name: 'vitest.exe', commandLine: 'vitest' }, ...rows])
   }))

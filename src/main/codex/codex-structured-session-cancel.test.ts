@@ -225,7 +225,7 @@ describe('CodexStructuredSessionAdapter.cancelTurn', () => {
     await expect(
       adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-1', fence: 7 })
     ).resolves.toEqual({ cancelled: false })
-    expect(events).not.toContainEqual(expect.objectContaining({ method: 'turn/completed' }))
+    expect(events).toContainEqual(expect.objectContaining({ method: 'turn/completed' }))
   })
 
   it('accepts an immediate resend after verified interruption', async () => {
@@ -259,7 +259,7 @@ describe('CodexStructuredSessionAdapter.cancelTurn', () => {
     })
   })
 
-  it('does not publish deferred completion when the interrupt receipt fails', async () => {
+  it('does not strand a deferred completion when the interrupt receipt fails', async () => {
     const events: CodexStructuredSessionEvent[] = []
     const codex = fakeCodex()
     codex.routes['turn/interrupt'] = () => {
@@ -273,6 +273,6 @@ describe('CodexStructuredSessionAdapter.cancelTurn', () => {
     await expect(
       adapter.cancelTurn({ sessionId: 'session-1', turnId: 'turn-1', fence: 7 })
     ).rejects.toThrow('interrupt receipt lost')
-    expect(events).not.toContainEqual(expect.objectContaining({ method: 'turn/completed' }))
+    expect(events).toContainEqual(expect.objectContaining({ method: 'turn/completed' }))
   })
 })

@@ -103,8 +103,12 @@ export class CodexStructuredTurnCancellation {
       !isCodexAppServerRequestError(requestError) &&
       !isCodexAppServerUnsupportedError(requestError)
     ) {
+      this.releaseCompletion(session, turnId)
       throw requestError
     }
+    // A failed cancellation must not permanently divert the provider's later
+    // completion for this turn. Let the normal completion path settle it.
+    this.releaseCompletion(session, turnId)
     return { cancelled: false }
   }
 

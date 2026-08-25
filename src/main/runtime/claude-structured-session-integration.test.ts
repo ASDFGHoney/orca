@@ -84,6 +84,7 @@ function fakeClaude() {
       respondWithError: async () => {},
       close: async () => {
         connection.closed = true
+        return true
       }
     }
     connections.push(connection)
@@ -262,6 +263,7 @@ beforeEach(async () => {
           ANTHROPIC_AUTH_TOKEN: 'configured-token',
           ANTHROPIC_BASE_URL: 'https://gateway.example.test'
         }),
+        readClaudeProcessStartTime: async () => 1_700_000_000_000,
         openClaudeConnection: claude.openConnection
       }).then(() => undefined),
     registerSubscriptionCleanup: (id: string, dispose: () => void) => cleanups.set(id, dispose),
@@ -397,7 +399,7 @@ describe('a structured Claude session over agentSession.*', () => {
       handle: {
         provider: 'claude',
         sessionId: PROVIDER_SESSION,
-        leafUuid: 'assistant-leaf'
+        leafUuid: 'user-1'
       },
       origin: 'resumed'
     })

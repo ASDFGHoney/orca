@@ -23,5 +23,105 @@ index 3eea92077c4d1d433119361d5c432881859131e9..1998f4addd4d7e9aba946ea6f7f7a4a5
 -    } while (process_count < 1024 && Process32Next(snapshot_handle, &process_entry));
 +    } while (Process32Next(snapshot_handle, &process_entry));
    }
- 
+
    CloseHandle(snapshot_handle);
+diff --git a/src/process.h b/src/process.h
+--- a/src/process.h
++++ b/src/process.h
+@@ -16,6 +16,7 @@ struct ProcessInfo {
+   DWORD ppid;
+   DWORD memory; // Reported in bytes
+   std::string commandLine;
++  ULONGLONG creationTimeMs;
+ };
+
+ enum ProcessDataFlags {
+@@ -24,4 +25,5 @@ enum ProcessDataFlags {
+   NONE = 0,
+   MEMORY = 1,
+-  COMMANDLINE = 2
++  COMMANDLINE = 2,
++  CREATIONTIME = 4
+ };
+@@ -33,4 +35,6 @@ void GetProcessMemoryUsage(ProcessInfo& process_info);
+
+ void GetCpuUsage(Cpu& cpu_info, bool first_run);
+
++void GetProcessCreationTime(ProcessInfo& process_info);
++
+ #endif  // SRC_PROCESS_H_
+diff --git a/src/process.cc b/src/process.cc
+--- a/src/process.cc
++++ b/src/process.cc
+@@ -32,5 +32,9 @@ uint32_t GetRawProcessList(std::vector<ProcessInfo>& process_info,
+         if (COMMANDLINE & process_data_flags) {
+           GetProcessCommandLine(pinfo);
+         }
+
++        if (CREATIONTIME & process_data_flags) {
++          GetProcessCreationTime(pinfo);
++        }
+
+         strcpy(pinfo.name, process_entry.szExeFile);
+@@ -62,4 +62,26 @@ void GetProcessMemoryUsage(ProcessInfo& process_info) {
+   CloseHandle(hProcess);
+ }
+
++void GetProcessCreationTime(ProcessInfo& process_info) {
++  HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_info.pid);
++  if (hProcess == NULL) {
++    return;
++  }
+
++  FILETIME creationTime, exitTime, kernelTime, userTime;
++  if (GetProcessTimes(hProcess, &creationTime, &exitTime, &kernelTime, &userTime)) {
++    ULARGE_INTEGER value;
++    value.LowPart = creationTime.dwLowDateTime;
++    value.HighPart = creationTime.dwHighDateTime;
++    // FILETIME is 100ns intervals since 1601; JavaScript dates use Unix ms.
++    constexpr ULONGLONG windowsEpochMs = 11644473600000ULL;
++    const ULONGLONG fileTimeMs = value.QuadPart / 10000ULL;
++    if (fileTimeMs >= windowsEpochMs) {
++      process_info.creationTimeMs = fileTimeMs - windowsEpochMs;
++    }
++  }
+
++  CloseHandle(hProcess);
++}
++
+ void GetCpuUsage(Cpu& cpu_info, bool first_pass) {
+diff --git a/src/process_worker.cc b/src/process_worker.cc
+--- a/src/process_worker.cc
++++ b/src/process_worker.cc
+@@ -47,5 +47,12 @@ void GetProcessesWorker::OnOK() {
+       object.Set("commandLine",
+           Napi::String::New(env, pinfo.commandLine));
+     }
+
++    if (CREATIONTIME & process_data_flags_) {
++      if (pinfo.creationTimeMs != 0) {
++        object.Set("creationTimeMs",
++                   Napi::Number::New(env, static_cast<double>(pinfo.creationTimeMs)));
++      }
++    }
+
+     result.Set(i, object);
+diff --git a/typings/windows-process-tree.d.ts b/typings/windows-process-tree.d.ts
+--- a/typings/windows-process-tree.d.ts
++++ b/typings/windows-process-tree.d.ts
+@@ -6,7 +6,8 @@ declare module '@vscode/windows-process-tree' {
+   export enum ProcessDataFlag {
+     None = 0,
+     Memory = 1,
+-    CommandLine = 2
++    CommandLine = 2,
++    CreationTime = 4
+   }
+@@ -22,6 +23,11 @@ declare module '@vscode/windows-process-tree' {
+     * strings exceeding this length are truncated.
+     */
+     commandLine?: string;
+
++    /** Process creation time in Unix milliseconds when queryable. */
++    creationTimeMs?: number;
+   }

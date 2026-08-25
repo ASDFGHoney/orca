@@ -32,6 +32,8 @@ export type WindowsProcessRow = {
   command: string
   /** Working set in bytes, or undefined when not requested/queryable. */
   memoryBytes?: number
+  /** Process creation time in Unix milliseconds, when the native snapshot provides it. */
+  creationTimeMs?: number
 }
 
 type NativeProcessInfo = {
@@ -40,10 +42,16 @@ type NativeProcessInfo = {
   name: string
   memory?: number
   commandLine?: string
+  creationTimeMs?: number
 }
 
 type WindowsProcessTreeModule = {
-  ProcessDataFlag: { None: number; Memory: number; CommandLine: number }
+  ProcessDataFlag: {
+    None: number
+    Memory: number
+    CommandLine: number
+    CreationTime?: number
+  }
   getAllProcesses: (
     callback: (processes: NativeProcessInfo[] | undefined) => void,
     flags?: number
@@ -134,7 +142,10 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
   // one snapshot so a 32-wide teardown collapses into a single scan, and that
   // snapshot has to satisfy every caller. Splitting the cache per field set
   // would restore exactly the fan-out it exists to prevent.
-  const flags = native.ProcessDataFlag.Memory | native.ProcessDataFlag.CommandLine
+  const flags =
+    native.ProcessDataFlag.Memory |
+    native.ProcessDataFlag.CommandLine |
+    (native.ProcessDataFlag.CreationTime ?? 0)
   return new Promise((resolve, reject) => {
     // Hoisted so a synchronous throw from getAllProcesses can clear it. An
     // orphaned timer would otherwise fire later and wedge a reader that had
@@ -175,7 +186,10 @@ function readNativeRows(): Promise<WindowsProcessRow[]> {
             ppid: row.ppid,
             name: row.name,
             command: row.commandLine ?? '',
-            memoryBytes: row.memory
+            memoryBytes: row.memory,
+            ...(typeof row.creationTimeMs === 'number'
+              ? { creationTimeMs: row.creationTimeMs }
+              : {})
           }))
         )
       }, flags)

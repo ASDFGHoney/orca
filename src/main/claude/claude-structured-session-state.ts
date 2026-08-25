@@ -150,11 +150,15 @@ export class ClaudeAcquisitionRegistry {
 
 export async function cancelClaudeAcquisitionAttempt(
   attempt: ClaudeAcquisitionAttempt | undefined
-): Promise<void> {
+): Promise<boolean> {
   if (!attempt) {
-    return
+    return true
   }
   attempt.cancelled = true
-  await attempt.connection?.close()
+  const stopped = (await attempt.connection?.close()) ?? true
+  if (!stopped) {
+    return false
+  }
   await attempt.finished
+  return true
 }

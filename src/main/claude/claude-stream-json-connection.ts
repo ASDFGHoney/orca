@@ -1,5 +1,4 @@
 import { spawnProcess } from '../../shared/child-process/run-process'
-import { assignHostProcessToKillOnCloseJob } from '../windows/windows-pty-job'
 import { createProviderSpawnSpec } from '../codex/codex-app-server-posix-supervisor'
 import { waitForProcessExitUntil } from '../codex/codex-process-exit-deadline'
 import { killCodexAppServerProcessTree } from '../codex/codex-app-server-session'
@@ -42,7 +41,8 @@ export type ClaudeStreamJsonConnection = {
   ) => Promise<unknown>
   respond: (requestId: string, response: unknown) => Promise<void>
   respondWithError: (requestId: string, error: string) => Promise<void>
-  close: () => Promise<void>
+  /** Returns false when the child could not be proven reaped. */
+  close: () => Promise<boolean>
 }
 
 export class ClaudeControlRequestError extends Error {
@@ -97,9 +97,6 @@ export async function openClaudeStreamJsonConnection(
         })
       : spawnProcess(createProviderSpawnSpec(launch, childEnv, process.platform))
   ) as ReturnType<typeof spawnProcess>
-  if (process.platform === 'win32') {
-    assignHostProcessToKillOnCloseJob()
-  }
   const pending = new Map<string, PendingRequest>()
   let nextRequestId = 1
   let stderrTail = ''
@@ -107,7 +104,7 @@ export async function openClaudeStreamJsonConnection(
   let closing = false
   let terminalError: Error | null = null
   let writeChain: Promise<void> = Promise.resolve()
-  let closePromise: Promise<void> | null = null
+  let closePromise: Promise<boolean> | null = null
 
   let settleExit = (): void => {}
   const exitPromise = new Promise<void>((resolve) => {
@@ -249,7 +246,7 @@ export async function openClaudeStreamJsonConnection(
     return promise
   }
 
-  const close = (): Promise<void> => {
+  const close = (): Promise<boolean> => {
     closePromise ??= (async () => {
       closing = true
       try {
@@ -265,6 +262,7 @@ export async function openClaudeStreamJsonConnection(
         }
       }
       failPending(new Error('claude stream-json connection closed'))
+      return exited
     })()
     return closePromise
   }

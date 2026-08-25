@@ -10881,17 +10881,11 @@ export class OrcaRuntimeService {
           )
         }
         const head = record.providerHandleChain.at(-1)
-        const provenLink = record.providerHandleChain.find(
-          (link) => link.linkId === record.lease.provenHandleLinkId
-        )
         const sameProviderIdentity =
           head &&
           (current.link.handle.provider === 'claude'
             ? agentSessionProviderHandleRoot(current.link.handle) ===
-                agentSessionProviderHandleRoot(head.handle) &&
-              (provenLink === undefined ||
-                agentSessionProviderHandleRoot(current.link.handle) ===
-                  agentSessionProviderHandleRoot(provenLink.handle))
+              agentSessionProviderHandleRoot(head.handle)
             : (record.lease.provenHandleLinkId === null ||
                 current.link.linkId === record.lease.provenHandleLinkId) &&
               agentSessionProviderHandlesEqual(current.link.handle, head.handle))
@@ -11483,7 +11477,11 @@ export class OrcaRuntimeService {
   }
 
   private async waitForStructuredTuiPtyExit(ptyId: string): Promise<void> {
+    const deadline = Date.now() + 5_000
     while (this.ptysById.get(ptyId)?.connected === true) {
+      if (Date.now() >= deadline) {
+        throw new Error('terminal_handle_stale')
+      }
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
   }

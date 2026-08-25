@@ -181,7 +181,7 @@ describe('owner identity probe', () => {
     ).resolves.toEqual({ outcome: 'identity-matched', matchedOn: ['spawn-token'] })
   })
 
-  it('reads a CIM-backed start time on Windows when running there', async () => {
+  it('reads a process-table start time on Windows when running there', async () => {
     const observed = await readProcessStartTimeMs(process.pid, 'win32')
     expect(observed === null).toBe(process.platform !== 'win32')
   })

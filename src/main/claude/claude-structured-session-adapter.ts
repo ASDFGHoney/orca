@@ -13,7 +13,6 @@ import { dispatchClaudeTurn, resolveClaudeReplayWaiter } from './claude-structur
 import { handleClaudeInboundControl } from './claude-structured-inbound-control'
 import {
   claudeAuthDiagnostic,
-  readClaudeFrameString,
   readClaudeInit,
   readClaudeRootUserFrameUuid,
   readClaudeModels
@@ -72,6 +71,7 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     const { previous, attempt } = this.acquisitions.start(sessionId, prompts)
     let liveSession: ClaudeSession | null = null
     let observedLeafUuid: string | null = null
+    let observedProviderSessionId: string | undefined
     const initTimeoutMs = this.deps.initTimeoutMs ?? CLAUDE_STRUCTURED_INIT_TIMEOUT_MS
     const initDeadline = createClaudeInitDeadline(sessionId, initTimeoutMs)
 
@@ -80,9 +80,13 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
       if (init) {
         initDeadline.resolve(init)
       }
-      observedLeafUuid = liveSession
-        ? (readClaudeRootUserFrameUuid(message, liveSession.providerSessionId) ?? observedLeafUuid)
-        : (readClaudeFrameString(message, 'uuid') ?? observedLeafUuid)
+      const rootPromptLeaf = readClaudeRootUserFrameUuid(
+        message,
+        liveSession?.providerSessionId ?? observedProviderSessionId
+      )
+      if (rootPromptLeaf) {
+        observedLeafUuid = rootPromptLeaf
+      }
       if (liveSession) {
         liveSession.leafUuid = observedLeafUuid
         resolveClaudeReplayWaiter(liveSession, message)
@@ -102,12 +106,17 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     }
 
     try {
-      await cancelClaudeAcquisitionAttempt(previous)
+      if (!(await cancelClaudeAcquisitionAttempt(previous))) {
+        throw new Error(`claude acquisition for session ${sessionId} could not be stopped`)
+      }
       this.acquisitions.assertCurrent(sessionId, attempt)
-      await this.closePublishedSession(sessionId)
+      if ((await this.closePublishedSession(sessionId)) === false) {
+        throw new Error(`claude stream-json for session ${sessionId} could not be stopped`)
+      }
       this.acquisitions.assertCurrent(sessionId, attempt)
       const launch = await this.deps.resolveLaunch({ identity: input.identity })
       observedLeafUuid = launch.resumeLeafUuid
+      observedProviderSessionId = launch.providerSessionId
       this.acquisitions.assertCurrent(sessionId, attempt)
       const open = this.deps.openConnection ?? openClaudeStreamJsonConnection
       const connection = await open(
@@ -172,7 +181,6 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
           diagnostic: claudeAuthDiagnostic(init, settings)
         })
       )
-      observedLeafUuid = init.uuid ?? observedLeafUuid
       const process = await claudeProcessIdentity(
         { ...input, pid: connection.pid },
         this.deps.readProcessStartTime
@@ -276,21 +284,18 @@ export class ClaudeStructuredSessionAdapter implements StructuredAgentSessionAda
     readClaudeStructuredSessionOptions(this.session(input.sessionId), this.deps.requestTimeoutMs)
 
   releaseAcquisition(input: { sessionId: string }): Promise<void> {
-    return this.closeSession(input.sessionId)
+    return this.closeSession(input.sessionId).then(() => undefined)
   }
 
-  async closeSession(sessionId: string): Promise<void> {
-    const attempt = this.acquisitions.get(sessionId)
-    if (attempt) {
-      attempt.cancelled = true
-      await attempt.connection?.close()
-      await attempt.finished
+  async closeSession(sessionId: string): Promise<void | boolean> {
+    if (!(await cancelClaudeAcquisitionAttempt(this.acquisitions.get(sessionId)))) {
+      return false
     }
-    await this.closePublishedSession(sessionId)
+    return this.closePublishedSession(sessionId)
   }
 
-  private async closePublishedSession(sessionId: string): Promise<void> {
-    await closeClaudePublishedSession({
+  private closePublishedSession(sessionId: string): Promise<boolean> {
+    return closeClaudePublishedSession({
       sessions: this.sessions,
       sessionId,
       ...(this.deps.persistHandle ? { persistHandle: this.deps.persistHandle } : {}),

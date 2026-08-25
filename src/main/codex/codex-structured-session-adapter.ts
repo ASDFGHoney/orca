@@ -79,9 +79,13 @@ export class CodexStructuredSessionAdapter implements StructuredAgentSessionAdap
     const open = this.deps.openConnection ?? openCodexAppServerConnection
 
     try {
-      await cancelCodexAcquisitionAttempt(previousAttempt)
+      if (!(await cancelCodexAcquisitionAttempt(previousAttempt))) {
+        throw new Error(`codex acquisition for session ${sessionId} could not be stopped`)
+      }
       this.acquisitions.assertCurrent(sessionId, attempt)
-      await closeCodexPublishedSession(this.sessions, sessionId, this.deps.onEvent)
+      if (!(await closeCodexPublishedSession(this.sessions, sessionId, this.deps.onEvent))) {
+        throw new Error(`codex app-server for session ${sessionId} could not be stopped`)
+      }
       this.acquisitions.assertCurrent(sessionId, attempt)
       const launch = await this.deps
         .resolveLaunch({ identity: input.identity })
@@ -294,11 +298,8 @@ export class CodexStructuredSessionAdapter implements StructuredAgentSessionAdap
   /** Reaps one session's child. The proven handle chain is already durable, so
    *  a graceful close loses nothing. */
   async closeSession(sessionId: string): Promise<void | boolean> {
-    const attempt = this.acquisitions.get(sessionId)
-    if (attempt) {
-      attempt.cancelled = true
-      await attempt.window.connection?.close()
-      await attempt.finished
+    if (!(await cancelCodexAcquisitionAttempt(this.acquisitions.get(sessionId)))) {
+      return false
     }
     return closeCodexPublishedSession(this.sessions, sessionId, this.deps.onEvent)
   }
