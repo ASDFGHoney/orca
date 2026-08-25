@@ -1,5 +1,5 @@
 import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react'
-import { AlertTriangle, ArrowLeft, Bug, RefreshCw } from 'lucide-react-native'
+import { AlertTriangle, Bug, House, RefreshCw } from 'lucide-react-native'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
 import {
@@ -9,7 +9,7 @@ import {
 
 type Props = {
   children: ReactNode
-  onGoBack: () => void
+  onReturnHome: () => void
 }
 
 type State = {
@@ -37,9 +37,11 @@ export class MobileRootErrorBoundary extends Component<Props, State> {
     this.setState(({ resetKey }) => ({ error: null, resetKey: resetKey + 1 }))
   }
 
-  handleGoBack = (): void => {
-    this.props.onGoBack()
-    this.handleRetry()
+  handleReturnHome = (): void => {
+    this.setState(
+      ({ resetKey }) => ({ error: null, resetKey: resetKey + 1 }),
+      this.props.onReturnHome
+    )
   }
 
   handleReport = (): void => {
@@ -53,7 +55,7 @@ export class MobileRootErrorBoundary extends Component<Props, State> {
       return (
         <MobileRootErrorFallback
           onRetry={this.handleRetry}
-          onGoBack={this.handleGoBack}
+          onReturnHome={this.handleReturnHome}
           onReport={this.handleReport}
         />
       )
@@ -65,11 +67,11 @@ export class MobileRootErrorBoundary extends Component<Props, State> {
 
 function MobileRootErrorFallback({
   onRetry,
-  onGoBack,
+  onReturnHome,
   onReport
 }: {
   onRetry: () => void
-  onGoBack: () => void
+  onReturnHome: () => void
   onReport: () => void
 }): ReactNode {
   return (
@@ -80,7 +82,7 @@ function MobileRootErrorFallback({
       <View style={styles.copy}>
         <Text style={styles.title}>This part of Orca hit an error.</Text>
         <Text style={styles.description}>
-          The app is still running. Retry this screen, go back, or share diagnostic details.
+          The app is still running. Retry this screen, return home, or share diagnostic details.
         </Text>
       </View>
       <View style={styles.actions}>
@@ -94,13 +96,13 @@ function MobileRootErrorFallback({
           <Text style={styles.primaryButtonText}>Retry</Text>
         </Pressable>
         <Pressable
-          accessibilityLabel="Go back"
+          accessibilityLabel="Return home"
           accessibilityRole="button"
           style={styles.secondaryButton}
-          onPress={onGoBack}
+          onPress={onReturnHome}
         >
-          <ArrowLeft size={16} color={colors.textSecondary} />
-          <Text style={styles.secondaryButtonText}>Go back</Text>
+          <House size={16} color={colors.textSecondary} />
+          <Text style={styles.secondaryButtonText}>Return home</Text>
         </Pressable>
         <Pressable
           accessibilityLabel="Report error"

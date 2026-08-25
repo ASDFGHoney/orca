@@ -84,7 +84,11 @@ export class MobileCrashSessionJournal {
     this.startPromise = this.enqueue(async () => {
       const stored = await this.readJournal()
       const abnormal =
-        stored?.activeSession.marker === 'open'
+        stored &&
+        (stored.activeSession.marker === 'open' ||
+          stored.activeSession.breadcrumbs.some(
+            (breadcrumb) => breadcrumb.name === 'render_error_contained'
+          ))
           ? snapshotMobileCrashSession(stored.activeSession)
           : null
       const openedAt = new Date(this.now()).toISOString()
@@ -237,7 +241,7 @@ function normalizeAppState(state: string): string {
 function describeError(error: unknown, componentStack?: string | null): CrashReportBreadcrumbData {
   const candidate = error instanceof Error ? error : null
   const message = candidate?.message ?? String(error)
-  const stack = candidate?.stack?.split(/\r?\n/).slice(1).join('\n').trim()
+  const stack = extractStackFrames(candidate?.stack, message)
   return {
     errorName: sanitizeCrashReportString(candidate?.name || 'NonErrorThrown', 80),
     errorFingerprint: fingerprint(message),
@@ -246,6 +250,16 @@ function describeError(error: unknown, componentStack?: string | null): CrashRep
       ? { componentStack: sanitizeCrashReportString(componentStack.trim(), MAX_STACK_CHARS) }
       : {})
   }
+}
+
+function extractStackFrames(stack: string | undefined, message: string): string | undefined {
+  const messageLineCount = message.split(/\r?\n/).length
+  const lines = (stack?.split(/\r?\n/) ?? []).slice(messageLineCount)
+  const firstFrameIndex = lines.findIndex((line) => /^\s+at\b/.test(line))
+  if (firstFrameIndex === -1) {
+    return undefined
+  }
+  return lines.slice(firstFrameIndex).join('\n').trim() || undefined
 }
 
 function fingerprint(value: string): string {

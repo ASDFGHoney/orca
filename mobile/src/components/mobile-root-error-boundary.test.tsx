@@ -8,8 +8,6 @@ const mocks = vi.hoisted(() => ({
   recordAppState: vi.fn().mockResolvedValue(undefined),
   recordRenderError: vi.fn().mockResolvedValue(undefined),
   recordRoute: vi.fn().mockResolvedValue(undefined),
-  routerBack: vi.fn(),
-  routerCanGoBack: true,
   routerReplace: vi.fn(),
   routeShouldThrow: true,
   shareDiagnostics: vi.fn().mockResolvedValue(undefined),
@@ -26,8 +24,8 @@ vi.mock('react-native', () => ({
 }))
 vi.mock('lucide-react-native', () => ({
   AlertTriangle: 'AlertTriangle',
-  ArrowLeft: 'ArrowLeft',
   Bug: 'Bug',
+  House: 'House',
   RefreshCw: 'RefreshCw'
 }))
 vi.mock('expo-router', () => {
@@ -41,8 +39,6 @@ vi.mock('expo-router', () => {
   return {
     Stack,
     useRouter: () => ({
-      back: mocks.routerBack,
-      canGoBack: () => mocks.routerCanGoBack,
       replace: mocks.routerReplace
     }),
     useSegments: () => ['h', '[hostId]', 'session', '[worktreeId]']
@@ -90,17 +86,15 @@ vi.mock('../diagnostics/mobile-crash-diagnostics', () => ({
 import RootLayout from '../../app/_layout'
 
 describe('mobile root error boundary', () => {
-  let renderer: ReactTestRenderer | null = null
+  let renderer!: ReactTestRenderer
 
   beforeEach(() => {
     mocks.routeShouldThrow = true
-    mocks.routerCanGoBack = true
     vi.clearAllMocks()
   })
 
   afterEach(() => {
-    act(() => renderer?.unmount())
-    renderer = null
+    act(() => renderer.unmount())
     vi.restoreAllMocks()
   })
 
@@ -115,7 +109,7 @@ describe('mobile root error boundary', () => {
     const buttons = fallback.findAllByType('Pressable')
     expect(buttons.map((button) => button.props.accessibilityLabel)).toEqual([
       'Retry',
-      'Go back',
+      'Return home',
       'Report error'
     ])
     expect(console.error).toHaveBeenCalledWith(
@@ -154,32 +148,19 @@ describe('mobile root error boundary', () => {
     expect(mocks.recordRoute).toHaveBeenCalledWith(['h', '[hostId]', 'session', '[worktreeId]'])
   })
 
-  it('navigates away from the failed route without clearing user data', () => {
+  it('returns home after remounting the failed route', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     act(() => {
       renderer = create(createElement(RootLayout))
     })
 
     mocks.routeShouldThrow = false
-    const goBack = renderer.root.findByProps({ accessibilityLabel: 'Go back' })
-    act(() => goBack.props.onPress())
-
-    expect(mocks.routerBack).toHaveBeenCalledOnce()
-    expect(mocks.routerReplace).not.toHaveBeenCalled()
-  })
-
-  it('returns home when the failed route has no back entry', () => {
-    mocks.routerCanGoBack = false
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    act(() => {
-      renderer = create(createElement(RootLayout))
+    mocks.routerReplace.mockImplementationOnce(() => {
+      expect(renderer.root.findAllByProps({ testID: 'mobile-root-error-boundary' })).toHaveLength(0)
     })
+    const returnHome = renderer.root.findByProps({ accessibilityLabel: 'Return home' })
+    act(() => returnHome.props.onPress())
 
-    mocks.routeShouldThrow = false
-    const goBack = renderer.root.findByProps({ accessibilityLabel: 'Go back' })
-    act(() => goBack.props.onPress())
-
-    expect(mocks.routerBack).not.toHaveBeenCalled()
     expect(mocks.routerReplace).toHaveBeenCalledWith('/')
   })
 })

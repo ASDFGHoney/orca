@@ -82,10 +82,10 @@ export function serializeMobileCrashJournal(journal: PersistedMobileCrashJournal
   while (serialized.length > MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS) {
     const previous = bounded.latestAbnormalSession?.breadcrumbs
     const active = bounded.activeSession.breadcrumbs
-    if (previous && previous.length > 1) {
-      previous.shift()
-    } else if (active.length > 1) {
+    if (active.length > 1) {
       active.shift()
+    } else if (previous && previous.length > 1) {
+      previous.shift()
     } else {
       break
     }

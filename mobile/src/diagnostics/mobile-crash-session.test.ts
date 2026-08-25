@@ -66,6 +66,55 @@ describe('mobile crash session journal', () => {
     expect(persisted.length).toBeLessThanOrEqual(MAX_MOBILE_CRASH_DIAGNOSTICS_CHARS)
   })
 
+  it('never persists or reports lines from a multi-line error message', async () => {
+    const storage = new MemoryStorage()
+    const journal = new MobileCrashSessionJournal(storage, {
+      now: () => FIRST_SESSION_AT,
+      createSessionId: () => 'session-one'
+    })
+    const error = new Error(
+      'Failed to render prompt:\nSYSTEM PROMPT LINE ONE the user typed\n    at private message-shaped frame'
+    )
+
+    await journal.start()
+    await journal.recordRenderError(error)
+
+    const report = await journal.buildReport({ version: '0.0.29', platform: 'ios 26.5' })
+    const persisted = storage.values.get(MOBILE_CRASH_SESSION_STORAGE_KEY) ?? ''
+    for (const privateLine of [
+      'SYSTEM PROMPT LINE ONE the user typed',
+      'private message-shaped frame'
+    ]) {
+      expect(report).not.toContain(privateLine)
+      expect(persisted).not.toContain(privateLine)
+    }
+  })
+
+  it('retains a contained render failure after a normal background handoff', async () => {
+    const storage = new MemoryStorage()
+    const first = new MobileCrashSessionJournal(storage, {
+      now: () => FIRST_SESSION_AT,
+      createSessionId: () => 'session-one'
+    })
+    await first.start()
+    await first.recordRenderError(new Error('contained render failure'))
+    await first.recordAppState('background')
+
+    const second = new MobileCrashSessionJournal(storage, {
+      now: () => SECOND_SESSION_AT,
+      createSessionId: () => 'session-two'
+    })
+
+    await expect(second.start()).resolves.toMatchObject({
+      breadcrumbs: expect.arrayContaining([
+        expect.objectContaining({ name: 'render_error_contained' })
+      ])
+    })
+    await expect(
+      second.buildReport({ version: '0.0.29', platform: 'android 15' })
+    ).resolves.toContain('render_error_contained')
+  })
+
   it('does not classify a session backgrounded cleanly as a crash', async () => {
     const storage = new MemoryStorage()
     const first = new MobileCrashSessionJournal(storage, {

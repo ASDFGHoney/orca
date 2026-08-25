@@ -230,16 +230,10 @@ function RootLayoutContents() {
 
 export default function RootLayout() {
   const router = useRouter()
-  const leaveFailedRoute = useCallback(() => {
-    if (router.canGoBack()) {
-      router.back()
-      return
-    }
-    router.replace('/')
-  }, [router])
+  const returnHome = useCallback(() => router.replace('/'), [router])
 
   return (
-    <MobileRootErrorBoundary onGoBack={leaveFailedRoute}>
+    <MobileRootErrorBoundary onReturnHome={returnHome}>
       <RootLayoutContents />
     </MobileRootErrorBoundary>
   )
