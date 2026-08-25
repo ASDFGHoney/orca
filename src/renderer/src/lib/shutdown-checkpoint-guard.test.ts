@@ -94,6 +94,18 @@ describe('createShutdownCheckpointGuard', () => {
     expect(consumeShutdownCheckpointFailureReason()).toBe('Unknown shutdown checkpoint failure')
   })
 
+  it('uses a fallback reason when an Error has an empty message', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = new Error('placeholder')
+    error.message = ''
+    const guard = createShutdownCheckpointGuard(() => {
+      throw error
+    })
+
+    expect(guard.persistOnce()).toBe(false)
+    expect(consumeShutdownCheckpointFailureReason()).toBe('Unknown shutdown checkpoint failure')
+  })
+
   it('resets state owned by the persist attempt lifecycle', () => {
     const abandonPersistAttempt = vi.fn()
     const guard = createShutdownCheckpointGuard(vi.fn(), abandonPersistAttempt)

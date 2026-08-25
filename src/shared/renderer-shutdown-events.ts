@@ -13,7 +13,8 @@ export const ORCA_SHUTDOWN_CHECKPOINT_FAILURE_REASON_ATTRIBUTE =
 
 export function formatShutdownCheckpointFailureReason(error: unknown): string {
   try {
-    return String(error instanceof Error ? error.message : error)
+    const reason = String(error instanceof Error ? error.message : error)
+    return reason || 'Unknown shutdown checkpoint failure'
   } catch {
     return 'Unknown shutdown checkpoint failure'
   }

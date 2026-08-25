@@ -6,6 +6,10 @@ import {
   publishShutdownCheckpointFailureReason
 } from '../../../shared/renderer-shutdown-events'
 import {
+  createShutdownCheckpointBeforeUnloadHandler,
+  createShutdownCheckpointGuard
+} from '../lib/shutdown-checkpoint-guard'
+import {
   dispatchWindowCloseRequest,
   getWindowCloseRequestHandler,
   isWindowCloseCheckpointInProgress,
@@ -99,6 +103,25 @@ describe('window-close-request-coordinator', () => {
       'Quit canceled: the session snapshot could not be saved (sendSync payload rejected).'
     )
     expect(consumeShutdownCheckpointFailureReason()).toBeNull()
+  })
+
+  it('shows a fallback reason when a Terminal-less checkpoint throws an empty Error', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = new Error('placeholder')
+    error.message = ''
+    const guard = createShutdownCheckpointGuard(() => {
+      throw error
+    })
+    window.addEventListener('beforeunload', createShutdownCheckpointBeforeUnloadHandler(guard), {
+      once: true
+    })
+
+    await dispatchWindowCloseRequest({ isQuitting: true })
+
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith(
+      'Quit canceled: the session snapshot could not be saved (Unknown shutdown checkpoint failure).'
+    )
   })
 
   it('delegates to the rich handler and does NOT confirm directly when one is registered', async () => {
