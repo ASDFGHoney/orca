@@ -165,7 +165,9 @@ export function startDeferredSessionReattach(
         return
       }
       session.reportError(message)
-      recoverUnverifiableReattach(session, deferredReattachSessionId)
+      if (session.directSshRetryAttempt) {
+        session.settleDirectSshPaneRetryAttempt(session.directSshRetryAttempt, 'failed')
+      }
     })
   session.armDirectSshPaneRetryTimeout(trackedReattachPromise, session.directSshRetryAttempt)
 }

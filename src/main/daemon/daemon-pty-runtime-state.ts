@@ -149,6 +149,7 @@ export abstract class DaemonPtyRuntimeState {
   protected overlayDeadlineWarnedSessionIds = new Set<string>()
   protected periodicDeadlineWarnedSessionIds = new Set<string>()
   protected keepHistoryShutdowns = new Set<Promise<void>>()
+  protected historyPreservingStopSessionIds = new Set<string>()
   protected disconnectOnlyPromise: Promise<void> | null = null
   protected supportsCheckpoints: boolean
   protected supportsIncrementalCheckpoints: boolean
@@ -269,8 +270,12 @@ export abstract class DaemonPtyRuntimeState {
     if (!incarnationId || !this.lastAuthenticatedIdentity) {
       return
     }
+    const previousIncarnationId = this.sessionIncarnations.get(id)
     this.sessionIncarnations.set(id, incarnationId)
     this.sessionOwnerIdentities.set(id, { ...this.lastAuthenticatedIdentity })
+    if (previousIncarnationId && previousIncarnationId !== incarnationId) {
+      this.historyPreservingStopSessionIds.delete(id)
+    }
   }
 
   protected hasExactSessionAuthority(

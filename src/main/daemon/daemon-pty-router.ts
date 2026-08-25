@@ -29,6 +29,13 @@ export class DaemonPtyRouter implements IPtyProvider {
     this.subscriptions = new DaemonPtyAdapterSubscriptionFanout(
       this.allAdapters(),
       (adapter, payload) => {
+        const retainedOwner = adapter.getTerminalOwnerIdentity?.(payload.id)
+        if (
+          payload.incarnationId &&
+          retainedOwner?.sessionIncarnationId === payload.incarnationId
+        ) {
+          return
+        }
         this.ownerResolver.forgetRoute(payload.id, adapter, payload.incarnationId)
       },
       (adapter) => this.ownerResolver.invalidateProvider(adapter)

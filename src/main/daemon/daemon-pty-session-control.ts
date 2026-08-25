@@ -168,6 +168,9 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionAuthority 
     if (opts.keepHistory && this.disconnectOnlyPromise) {
       throw new Error('Cannot keep history after daemon disconnect has started')
     }
+    if (opts.keepHistory) {
+      this.historyPreservingStopSessionIds.add(id)
+    }
     const shutdown = this.withHistorySpawnLock(id, () => this.shutdownWithHistoryLock(id, opts))
     if (!opts.keepHistory) {
       await shutdown
@@ -176,6 +179,9 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionAuthority 
     this.keepHistoryShutdowns.add(shutdown)
     try {
       await shutdown
+    } catch (error) {
+      this.historyPreservingStopSessionIds.delete(id)
+      throw error
     } finally {
       this.keepHistoryShutdowns.delete(shutdown)
     }
@@ -242,8 +248,11 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionAuthority 
       remainingDaemonRequestTimeoutMs(opts.deadlineMs)
     )
     this.activeSessionIds.delete(id)
-    this.sessionIncarnations.delete(id)
-    this.sessionOwnerIdentities.delete(id)
+    if (!opts.keepHistory) {
+      this.historyPreservingStopSessionIds.delete(id)
+      this.sessionIncarnations.delete(id)
+      this.sessionOwnerIdentities.delete(id)
+    }
     this.clearSessionAwaitingDaemonRecovery(id)
     this.dirtySessionVersions.delete(id)
     if (!opts.keepHistory) {
@@ -282,6 +291,7 @@ export abstract class DaemonPtySessionControl extends DaemonPtySessionAuthority 
   }
 
   ackColdRestore(sessionId: string): void {
+    this.historyPreservingStopSessionIds.delete(sessionId)
     this.coldRestoreCache.delete(sessionId)
     this.sleepRestoreSessionIds.delete(sessionId)
   }

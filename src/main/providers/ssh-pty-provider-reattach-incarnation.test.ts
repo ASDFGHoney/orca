@@ -75,6 +75,24 @@ describe('SSH PTY provider session reattach incarnation', () => {
     )
   })
 
+  it('rejects a legacy attach that cannot echo a persisted incarnation', async () => {
+    const mux = {
+      request: vi.fn().mockResolvedValue({ replay: 'saved output' }),
+      notify: vi.fn(),
+      onNotification: vi.fn().mockReturnValue(vi.fn())
+    }
+    const provider = new SshPtyProvider('conn-1', mux as never)
+
+    await expect(
+      provider.spawn({
+        cols: 80,
+        rows: 24,
+        sessionId: 'pty-old',
+        expectedIncarnationId: 'incarnation-original'
+      })
+    ).rejects.toBeInstanceOf(TerminalSessionOwnerUnverifiedError)
+  })
+
   it('keeps relay absence owner-unverified', async () => {
     const mux = {
       request: vi.fn().mockRejectedValue(new Error('PTY "pty-old" not found')),

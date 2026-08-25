@@ -42,6 +42,7 @@ type ReattachResultSession = ReattachPayloadSession &
     | 'scheduleReattachIdleAgentCursorReset'
     | 'serializeHiddenOutputSnapshot'
     | 'setPanePtyFitBinding'
+    | 'settleDirectSshPaneRetryAttempt'
     | 'startFreshColdRestoreAgentResume'
     | 'structuralReplayCoordinator'
     | 'syncHiddenRendererPtyDelivery'
@@ -95,7 +96,9 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
         paneId: session.pane.id,
         ptyId: staleSessionId ?? null
       })
-      recoverUnverifiableReattach(sessionBag, staleSessionId)
+      if (session.directSshRetryAttempt) {
+        session.settleDirectSshPaneRetryAttempt(session.directSshRetryAttempt, 'failed')
+      }
       return false
     }
     session.registerEffectiveLaunchConfig(connectResult?.launchConfig, {

@@ -64,7 +64,6 @@ import {
   stripSshReconnectOwnedErrorLines,
   TerminalErrorToast
 } from './TerminalErrorToast'
-import { TERMINAL_PANE_OWNER_UNVERIFIED } from '../../../../shared/terminal-pane-owner-verdict'
 import { TerminalProcessExitOverlay } from './TerminalProcessExitOverlay'
 import { TerminalSessionStateSaveFailureDialog } from './TerminalSessionStateSaveFailureDialog'
 import TerminalContextMenu from './TerminalContextMenu'
@@ -507,8 +506,9 @@ function TerminalPane(
     }
   }, [])
   const retryTerminalConnection = useCallback(() => {
-    setTerminalError(null)
-    useAppStore.getState().remountTerminalTabForRecovery(tabId)
+    if (useAppStore.getState().remountTerminalTabForRecovery(tabId)) {
+      setTerminalError(null)
+    }
   }, [tabId])
   const onPtyRecoveryStateRef = useRef(
     (paneId: number, state: PtyTransportRecoveryState | null) => {
@@ -2932,32 +2932,6 @@ function TerminalPane(
 
   const activePane = managerRef.current?.getActivePane()
   const managedPanes = managerRef.current?.getPanes() ?? []
-  // A daemon handoff can leave the renderer waiting on a preserved PTY without
-  // producing an IPC error. Surface the same explicit retry state instead of
-  // leaving the user with an unexplained blank pane.
-  useEffect(() => {
-    const currentPanes = managerRef.current?.getPanes() ?? []
-    if (!isActive || !isVisible || currentPanes.length === 0) {
-      return
-    }
-    const savedPtyIds = Object.values(savedLayout.ptyIdsByLeafId ?? {}).filter(Boolean)
-    if (savedPtyIds.length === 0) {
-      return
-    }
-    const hasUnboundPane = currentPanes.some(
-      (pane) => paneTransportsRef.current.get(pane.id)?.getPtyId() == null
-    )
-    if (!hasUnboundPane) {
-      if (terminalError && isPaneOwnerUnverifiedError(terminalError)) {
-        setTerminalError(null)
-      }
-      return
-    }
-    const timer = window.setTimeout(() => {
-      setTerminalError((current) => current ?? TERMINAL_PANE_OWNER_UNVERIFIED)
-    }, 1_500)
-    return () => window.clearTimeout(timer)
-  }, [isActive, isVisible, managerRef, paneCount, paneLayoutRevision, savedLayout, terminalError])
   const showSshReconnectOverlay = Boolean(
     isActive &&
     isVisible &&

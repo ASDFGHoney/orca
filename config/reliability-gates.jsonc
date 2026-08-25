@@ -14330,22 +14330,24 @@
       "platforms": ["macos", "linux", "windows"],
       "providers": ["local-daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos", "linux"],
-      "coveredProviders": ["local-daemon", "ssh"],
-      "coverageNotes": "Deterministic production-boundary tests cover persisted daemon owner identity, full-owner retirement CAS and rollback, local daemon routing, pre-side-effect daemon attach fencing, SSH provider/relay incarnation checks, exact relay exit proof, renderer preservation, and guarded recovery. A real macOS multi-generation daemon journey and rendered Docker SSH reconnect journey passed. Paired headed/headless was blocked by missing web-client URL; targeted A/B update handoff, WSL, ConPTY, and physical Windows remain gaps.",
+      "coveredProviders": ["local-daemon", "ssh", "remote-runtime"],
+      "coverageNotes": "Deterministic production-boundary tests cover persisted daemon owner identity, full-owner retirement CAS and rollback, local daemon routing, pre-side-effect daemon attach fencing, SSH provider/relay incarnation checks, exact relay exit proof, renderer preservation, remote-runtime failure classification, and guarded recovery. Real macOS multi-generation, rendered Docker SSH reconnect, and paired remote materialization/reconnect journeys passed. The headed/headless probe-gap journey was blocked by missing web-client URL; targeted A/B update handoff, WSL, ConPTY, and physical Windows remain gaps.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-5269",
         "https://github.com/stablyai/orca/pull/16152"
       ],
       "invariant": "Only the exact execution host, owner incarnation, and session incarnation may report live or exited. Missing routes, adapters, metadata, or contact are unverifiable and preserve every PTY binding, terminal row, pane, tab, and retry lease.",
-      "oracle": "Persist a PTY owned by daemon A, replace the compatible current slot with daemon B, and have B report the logical id absent. Require an unverifiable verdict without querying B as the owner, without broad fallback, deletion, fresh spawn, or unrelated stop. Exact A plus the exact session may report live or exited; a mismatched reused incarnation, provider loss, and owner-unverified result or throw preserve topology and settle guarded recovery.",
+      "oracle": "Persist a PTY owned by daemon A, replace the compatible current slot with daemon B, and have B report the logical id absent. Require an unverifiable verdict without querying B as the owner, without broad fallback, deletion, fresh spawn, or unrelated stop. Exact A plus the exact session may report live or exited; an intentional history-preserving stop retains that exact authority and may restore the pane. A mismatched reused incarnation, provider loss, and owner-unverified result or throw preserve topology and settle guarded recovery.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-session-owner-authority.oracle.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-session-owner-resolution.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/daemon-pty-router-owner-fencing.test.ts src/main/daemon/daemon-pty-adapter-protocol-compatibility.test.ts src/main/daemon/daemon-pty-adapter-session-adoption.test.ts src/main/daemon/terminal-host.test.ts src/main/daemon/terminal-host-incarnation-fence.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-pty-adapter-history-checkpoints.test.ts src/main/daemon/daemon-pty-adapter-history-recovery.test.ts src/main/daemon/daemon-pty-history-stop-inventory.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty-startup-barrier-and-listing.test.ts src/main/ipc/pty-persisted-incarnation-repair.test.ts src/main/ipc/pty-dead-owner-respawn.test.ts src/main/ipc/pty-controller-spawn-admission.test.ts src/main/agent-hooks/restored-subagent-liveness-sweep.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty/pane/stable-owner-retirement.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/ssh-pty-provider-spawn.test.ts src/main/providers/ssh-pty-provider-reattach-incarnation.test.ts src/relay/pty-handler-attach-replay.test.ts --reporter=dot",
-        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport-spawn-errors.test.ts src/renderer/src/components/terminal-pane/pty-transport-reattach-admission.test.ts src/renderer/src/components/terminal-pane/pty-connection-session-liveness.test.ts src/renderer/src/components/terminal-pane/pty-connection-reattach-binding.test.ts src/renderer/src/components/terminal-pane/pty-connection-direct-ssh-reattach-retry.test.ts src/renderer/src/components/terminal-pane/pty-connection/direct-ssh-reattach-recovery.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport-spawn-errors.test.ts src/renderer/src/components/terminal-pane/pty-transport-reattach-admission.test.ts src/renderer/src/components/terminal-pane/pty-connection-session-liveness.test.ts src/renderer/src/components/terminal-pane/pty-connection-reattach-binding.test.ts src/renderer/src/components/terminal-pane/pty-connection-direct-ssh-reattach-retry.test.ts src/renderer/src/components/terminal-pane/pty-connection/direct-ssh-reattach-recovery.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-pane-handle-resolution.test.ts --reporter=dot",
         "pnpm exec playwright test tests/e2e/daemon-generation-reconnect-safety.spec.ts tests/e2e/daemon-generation-legacy-close-safety.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1",
+        "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/paired-remote-terminal-materialization-reconnect.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1",
         "ORCA_E2E_SSH_DOCKER=1 pnpm exec playwright test tests/e2e/ssh-docker-reconnect-pane-restore.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1",
         "pnpm exec playwright test tests/e2e/paired-remote-terminal-probe-gap-recovery.spec.ts tests/e2e/headless-paired-remote-terminal-stall-recovery.spec.ts --config tests/playwright.config.ts --project=electron-headful --workers=1"
       ],
@@ -14356,6 +14358,9 @@
         "src/main/daemon/daemon-pty-router-owner-fencing.test.ts",
         "src/main/daemon/daemon-pty-adapter-protocol-compatibility.test.ts",
         "src/main/daemon/daemon-pty-adapter-session-adoption.test.ts",
+        "src/main/daemon/daemon-pty-adapter-history-checkpoints.test.ts",
+        "src/main/daemon/daemon-pty-adapter-history-recovery.test.ts",
+        "src/main/daemon/daemon-pty-history-stop-inventory.test.ts",
         "src/main/daemon/terminal-host.test.ts",
         "src/main/daemon/terminal-host-incarnation-fence.test.ts",
         "src/main/daemon/degraded-daemon-pty-provider.test.ts",
@@ -14374,8 +14379,10 @@
         "src/renderer/src/components/terminal-pane/pty-connection-reattach-binding.test.ts",
         "src/renderer/src/components/terminal-pane/pty-connection-direct-ssh-reattach-retry.test.ts",
         "src/renderer/src/components/terminal-pane/pty-connection/direct-ssh-reattach-recovery.test.ts",
+        "src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-pane-handle-resolution.test.ts",
         "tests/e2e/daemon-generation-reconnect-safety.spec.ts",
         "tests/e2e/daemon-generation-legacy-close-safety.spec.ts",
+        "tests/e2e/paired-remote-terminal-materialization-reconnect.spec.ts",
         "tests/e2e/ssh-docker-reconnect-pane-restore.spec.ts",
         "tests/e2e/paired-remote-terminal-probe-gap-recovery.spec.ts",
         "tests/e2e/headless-paired-remote-terminal-stall-recovery.spec.ts"
@@ -14386,6 +14393,24 @@
           "assertions": [
             "a replacement daemon cannot report a historical owner session exited",
             "only an exact routed owner and session can confirm absence"
+          ]
+        },
+        {
+          "file": "src/main/daemon/daemon-pty-adapter-history-checkpoints.test.ts",
+          "assertions": [
+            "a history-preserving stop retains exact owner authority and reports that session exited"
+          ]
+        },
+        {
+          "file": "src/main/daemon/daemon-pty-adapter-history-recovery.test.ts",
+          "assertions": [
+            "a delayed physical exit after an unreadable history-preserving stop cannot erase exact exit authority"
+          ]
+        },
+        {
+          "file": "src/main/daemon/daemon-pty-history-stop-inventory.test.ts",
+          "assertions": [
+            "authenticated inventory racing a history-preserving exit cannot erase exact exit authority"
           ]
         },
         {
@@ -14411,6 +14436,13 @@
           "file": "src/renderer/src/components/terminal-pane/pty-connection-direct-ssh-reattach-retry.test.ts",
           "assertions": [
             "result and thrown owner-unverified outcomes settle the exact retry and preserve topology"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-pane-handle-resolution.test.ts",
+          "assertions": [
+            "runtime outages remain quiet reconnect state while only explicit owner-unverified verdicts show ownership recovery UI",
+            "generic saved-pane failures retain their original diagnostic without fabricating an owner verdict"
           ]
         }
       ],
@@ -14479,13 +14511,13 @@
           "summary": "Three SSH provider and relay files passed 54 attach, incarnation, source-recovery, and exact-exit tests."
         },
         {
-          "date": "2026-08-23",
+          "date": "2026-08-25",
           "runner": "local",
           "platform": "macos",
           "result": "passed",
-          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport-spawn-errors.test.ts src/renderer/src/components/terminal-pane/pty-transport-reattach-admission.test.ts src/renderer/src/components/terminal-pane/pty-connection-session-liveness.test.ts src/renderer/src/components/terminal-pane/pty-connection-reattach-binding.test.ts src/renderer/src/components/terminal-pane/pty-connection-direct-ssh-reattach-retry.test.ts src/renderer/src/components/terminal-pane/pty-connection/direct-ssh-reattach-recovery.test.ts --reporter=dot",
-          "durationSeconds": 4.07,
-          "summary": "Six renderer files passed 65 liveness, typed-result, topology-preservation, and bounded recovery tests."
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport-spawn-errors.test.ts src/renderer/src/components/terminal-pane/pty-transport-reattach-admission.test.ts src/renderer/src/components/terminal-pane/pty-connection-session-liveness.test.ts src/renderer/src/components/terminal-pane/pty-connection-reattach-binding.test.ts src/renderer/src/components/terminal-pane/pty-connection-direct-ssh-reattach-retry.test.ts src/renderer/src/components/terminal-pane/pty-connection/direct-ssh-reattach-recovery.test.ts src/renderer/src/components/terminal-pane/remote-runtime-pty-transport-pane-handle-resolution.test.ts --reporter=dot",
+          "durationSeconds": 3.72,
+          "summary": "Seven renderer files passed 85 liveness, failure-classification, topology-preservation, and bounded recovery tests."
         },
         {
           "date": "2026-08-25",

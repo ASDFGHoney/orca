@@ -403,6 +403,7 @@ describe('connectPanePty', () => {
     expect(deps.clearTabPtyId).not.toHaveBeenCalled()
     expect(deps.syncPanePtyLayoutBinding).not.toHaveBeenCalled()
     expect(deps.updateTabPtyId).not.toHaveBeenCalled()
+    expect(deps.onPtyErrorRef.current).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -474,8 +475,39 @@ describe('connectPanePty', () => {
         { id: 'tab-1', ptyId: null, generation: 7 }
       ])
       expect(mockStoreState.deferredSshSessionIdsByTabId['tab-1']).toBe(restoredPtyId)
+      if (outcome === 'reject') {
+        expect(deps.onPtyErrorRef.current).toHaveBeenCalledWith(1, 'relay attach timed out')
+      } else {
+        expect(deps.onPtyErrorRef.current).not.toHaveBeenCalled()
+      }
+      expect(deps.onPtyErrorRef.current).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.stringContaining('terminal_pane_owner_unverified')
+      )
     }
   )
+
+  it('surfaces a generic restored-pane failure without calling it owner-unverified', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport()
+    transport.connect.mockRejectedValueOnce(new Error('daemon package is unavailable'))
+    transportFactoryQueue.push(transport)
+    const deps = createDeps({
+      restoredLeafId: LEAF_2,
+      restoredPtyIdByLeafId: { [LEAF_2]: 'preserved-pty' }
+    })
+
+    connectPanePty(createPane(2) as never, createManager(2) as never, deps as never)
+    await flushAsyncTicks()
+
+    expect(deps.onPtyErrorRef.current).toHaveBeenCalledWith(2, 'daemon package is unavailable')
+    expect(deps.onPtyErrorRef.current).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringContaining('terminal_pane_owner_unverified')
+    )
+    expect(deps.clearExitedPanePtyLayoutBinding).not.toHaveBeenCalled()
+    expect(deps.clearTabPtyId).not.toHaveBeenCalled()
+  })
   it.each(['result', 'throw'] as const)(
     'preserves a restored pane binding when its daemon owner is unverifiable (%s)',
     async (outcome) => {

@@ -81,6 +81,7 @@ import {
   ptyShutdownLifecycleHandlers
 } from './pty-shutdown-data-suspension'
 import { getRuntimeEnvironmentRevision } from '@/runtime/runtime-environment-revision'
+import { isTerminalPaneOwnerUnverified } from '../../../../shared/terminal-pane-owner-verdict'
 
 const REMOTE_TERMINAL_INPUT_FLUSH_MS = 8
 const REMOTE_TERMINAL_VIEWPORT_FLUSH_MS = 33
@@ -2194,21 +2195,21 @@ export function createRemoteRuntimePtyTransport(
           ...(createdTerminal.isReattach === true ? { isReattach: true } : {})
         } satisfies PtyConnectResult
       } catch (error) {
-        let ownerUnverifiableResult: PtyConnectResult | undefined
+        let connectResult: PtyConnectResult | undefined
         if (!destroyed && lifecycleEpoch === connectLifecycleEpoch) {
           connecting = false
           const message = runtimeTerminalErrorMessage(error)
           if (options.sessionId && isRemoteTerminalGoneMessage(message)) {
             recovery.cancel()
             handleRemoteTerminalError(error)
-            ownerUnverifiableResult = {
+            connectResult = {
               id: options.sessionId,
               exitedBeforeAttach: true
             }
-          } else if (options.sessionId) {
+          } else if (options.sessionId && isTerminalPaneOwnerUnverified(message)) {
             recovery.markDisconnected()
             surfaceErrorMessage(message)
-            ownerUnverifiableResult = {
+            connectResult = {
               id: options.sessionId,
               ownerUnverifiable: true
             }
@@ -2225,7 +2226,7 @@ export function createRemoteRuntimePtyTransport(
             surfaceErrorMessage(message)
           }
         }
-        return ownerUnverifiableResult
+        return connectResult
       }
     },
 

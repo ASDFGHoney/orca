@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { DaemonPtyAdapter } from './daemon-pty-adapter'
 import { DaemonPtyRouter } from './daemon-pty-router'
 import type { PtySpawnOptions, PtySpawnResult } from '../providers/types'
+import type { TerminalOwnerIdentity } from '../../shared/terminal-owner-identity'
+import { PROTOCOL_VERSION } from './daemon-protocol-version'
 
 type FenceAdapter = DaemonPtyAdapter & {
   emitExit: (id: string, code: number, incarnationId: string) => void
@@ -23,6 +25,7 @@ function createFenceAdapter(label: string, initialSessions: string[] = []): Fenc
     listProcesses: vi.fn(async () =>
       sessions.map((id) => ({ id, incarnationId: `${label}:${id}`, cwd: '', title: label }))
     ),
+    probePtyLiveness: vi.fn(async (id: string) => sessions.includes(id)),
     write: vi.fn(),
     shutdown: vi.fn(),
     onData: noopSubscription,
@@ -46,6 +49,34 @@ function createFenceAdapter(label: string, initialSessions: string[] = []): Fenc
 }
 
 describe('DaemonPtyRouter owner fencing', () => {
+  it('retains the exact owner route for a history-preserving stop', async () => {
+    const current = createFenceAdapter('current')
+    const legacy = createFenceAdapter('legacy', ['parked-session'])
+    const router = new DaemonPtyRouter({ current, legacy: [legacy] })
+    await router.discoverLegacySessions()
+    const parkedOwner = {
+      executionHostId: 'local',
+      ownerKind: 'daemon',
+      ownerIncarnationId: 'legacy-daemon',
+      sessionIncarnationId: 'legacy:parked-session',
+      protocolVersion: PROTOCOL_VERSION,
+      endpointRef: 'daemon-v37'
+    } satisfies TerminalOwnerIdentity
+    legacy.getTerminalOwnerIdentity = vi.fn(() => parkedOwner)
+    legacy.probePtyLiveness = vi.fn(async () => false)
+    vi.mocked(legacy.shutdown).mockImplementation(async () => {
+      legacy.emitExit('parked-session', -1, 'legacy:parked-session')
+    })
+
+    await router.shutdown('parked-session', { keepHistory: true })
+
+    await expect(
+      router.probePtyLiveness('parked-session', 'legacy:parked-session', parkedOwner)
+    ).resolves.toBe(false)
+    expect(legacy.probePtyLiveness).toHaveBeenCalledOnce()
+    expect(current.probePtyLiveness).not.toHaveBeenCalled()
+  })
+
   it('keeps replacement B routed after a delayed exit from owner A', async () => {
     const current = createFenceAdapter('current')
     const legacy = createFenceAdapter('legacy', ['reused-session'])

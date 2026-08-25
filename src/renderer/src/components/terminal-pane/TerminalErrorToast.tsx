@@ -191,7 +191,7 @@ export function TerminalErrorToast({
               <div className="shrink-0 text-sm font-semibold">
                 {translate(
                   'auto.components.terminal.pane.TerminalErrorToast.ownerUnavailableTitle',
-                  'Terminal session unavailable'
+                  'Terminal session not connected'
                 )}
               </div>
               <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -201,7 +201,7 @@ export function TerminalErrorToast({
             <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
               {translate(
                 'auto.components.terminal.pane.TerminalErrorToast.ownerUnavailableDetail',
-                "Orca couldn't confirm whether the previous session is still running. The tab and session are preserved; retry when the owner is available."
+                "Orca couldn't verify whether this saved session is still running, so it left the tab and history untouched. Check again retries the saved panes in this tab; it won't close or replace them."
               )}
             </div>
             {footer ? (
@@ -213,7 +213,7 @@ export function TerminalErrorToast({
           <Button className="shrink-0" size="sm" onClick={onRetry}>
             {translate(
               'auto.components.terminal.pane.TerminalErrorToast.retryConnection',
-              'Retry connection'
+              'Check again'
             )}
           </Button>
         </div>

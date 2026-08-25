@@ -62,8 +62,10 @@ export abstract class DaemonPtySessionInventory extends DaemonPtyProcessInspecti
       for (const id of preRequestActiveIds) {
         if (!aliveSessionIds.has(id)) {
           this.activeSessionIds.delete(id)
-          this.sessionIncarnations.delete(id)
-          this.sessionOwnerIdentities.delete(id)
+          if (!this.historyPreservingStopSessionIds.has(id)) {
+            this.sessionIncarnations.delete(id)
+            this.sessionOwnerIdentities.delete(id)
+          }
         }
       }
       this.publishAuditObservation(
@@ -140,6 +142,7 @@ export abstract class DaemonPtySessionInventory extends DaemonPtyProcessInspecti
     this.overlayDeadlineWarnedSessionIds.clear()
     this.periodicDeadlineWarnedSessionIds.clear()
     this.nonFinalAdmissionDeniedSessionIds.clear()
+    this.historyPreservingStopSessionIds.clear()
     this.pausedProducerSessionIds.clear()
     this.producerResumesOwedOnReconnect.clear()
     this.stopCheckpointTimer()
