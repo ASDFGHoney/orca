@@ -9,6 +9,12 @@ function recentContextLosses(pane: ManagedPaneInternal, now: number): number[] {
   return (pane.webglContextLossTimestamps ?? []).filter((timestamp) => timestamp > cutoff)
 }
 
+export function prunePaneWebglContextLosses(pane: ManagedPaneInternal, now = Date.now()): number {
+  const losses = recentContextLosses(pane, now)
+  pane.webglContextLossTimestamps = losses
+  return losses.length
+}
+
 export function recordPaneWebglContextLoss(pane: ManagedPaneInternal, now = Date.now()): number {
   const losses = recentContextLosses(pane, now)
   losses.push(now)
@@ -20,9 +26,7 @@ export function canRetryPaneWebglAfterContextLoss(
   pane: ManagedPaneInternal,
   now = Date.now()
 ): boolean {
-  const losses = recentContextLosses(pane, now)
-  pane.webglContextLossTimestamps = losses
-  return losses.length < WEBGL_CONTEXT_LOSS_RETRY_LIMIT
+  return prunePaneWebglContextLosses(pane, now) < WEBGL_CONTEXT_LOSS_RETRY_LIMIT
 }
 
 export function resetPaneWebglContextLosses(pane: ManagedPaneInternal): void {
