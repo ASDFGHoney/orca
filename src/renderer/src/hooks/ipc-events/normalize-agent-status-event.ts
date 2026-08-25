@@ -9,6 +9,7 @@ export function normalizeAgentStatusEvent(
 ): ParsedAgentStatusPayload | null {
   return normalizeAgentStatusPayload({
     state: data.state,
+    workingMode: data.workingMode,
     prompt: data.prompt,
     agentType: data.agentType,
     model: data.model,

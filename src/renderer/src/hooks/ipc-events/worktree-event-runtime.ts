@@ -1,5 +1,5 @@
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
-import type { ExecutionHostId } from '../../../../shared/execution-host'
+import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../../../shared/execution-host'
 import type { RuntimeClientEvent } from '../../../../shared/runtime-client-events'
 import type { AppState } from '../../store/types'
 import { useAppStore } from '../../store'
@@ -119,7 +119,13 @@ export function createWorktreeEventRuntime(
         `[worktree-purge] diff-based purge removing state for ${removed.length} worktree(s):`,
         removed
       )
-      afterState.purgeWorktreeTerminalState(removed)
+      const purgeHostId =
+        options?.executionHostId ??
+        // A forced-local refresh owns only the local host's panes.
+        (options?.forceLocalOwner ? LOCAL_EXECUTION_HOST_ID : undefined)
+      afterState.purgeWorktreeTerminalState(
+        purgeHostId ? removed.map((id) => ({ id, hostId: purgeHostId })) : removed
+      )
       afterState.removeWorkspaceSpaceWorktrees(removed)
     }
   }

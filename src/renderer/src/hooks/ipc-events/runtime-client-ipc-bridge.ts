@@ -21,37 +21,12 @@ import {
 } from '../runtime-project-refresh-scheduler'
 import {
   buildRuntimeClientEventEnvironmentKey,
-  getNewlyDisconnectedRuntimeEnvironmentIds,
-  getRuntimeProjectRefreshEnvironmentIds
+  createRuntimeEnvironmentStoreSyncSubscriber,
+  getReachableRuntimeEnvironmentIds,
+  getRuntimeClientEventEnvironmentIds,
+  invalidateRuntimeClientEventReplay
 } from './runtime-environment-subscription-selection'
 import type { WorktreeEventRuntime } from './worktree-event-runtime'
-
-function getActiveRuntimeEnvironmentId(): string | null {
-  return useAppStore.getState().settings?.activeRuntimeEnvironmentId?.trim() || null
-}
-function getRuntimeClientEventEnvironmentIds(): string[] {
-  const state = useAppStore.getState()
-  const ids = new Set<string>()
-  const activeEnvironmentId = getActiveRuntimeEnvironmentId()
-  if (activeEnvironmentId) {
-    ids.add(activeEnvironmentId)
-  }
-  for (const environment of state.runtimeEnvironments ?? []) {
-    if (state.runtimeStatusByEnvironmentId?.get(environment.id)?.status) {
-      ids.add(environment.id)
-    }
-  }
-  return [...ids]
-}
-function getReachableRuntimeEnvironmentIds(): string[] {
-  const ids: string[] = []
-  for (const [environmentId, status] of useAppStore.getState().runtimeStatusByEnvironmentId ?? []) {
-    if (status?.status) {
-      ids.push(environmentId)
-    }
-  }
-  return ids
-}
 
 export function registerRuntimeClientIpcBridge(
   unsubs: (() => void)[],
@@ -150,7 +125,7 @@ export function registerRuntimeClientIpcBridge(
   }
 
   const runtimeClientEventsSync = createRuntimeClientEventsSync({
-    getDesiredEnvironmentIds: getRuntimeClientEventEnvironmentIds,
+    getDesiredEnvironmentIds: () => getRuntimeClientEventEnvironmentIds(useAppStore.getState()),
     getSubscriptionKey: (environmentId) => buildRuntimeClientEventEnvironmentKey([environmentId]),
     subscribe: (environmentId, onEvent, onError) => {
       const sshGeneration = getEnvironmentSshStateGeneration(environmentId)
@@ -169,62 +144,54 @@ export function registerRuntimeClientIpcBridge(
         },
         onError,
         () => {
-          // Why: events during a transport gap are lost; a quick reconnect won't flip unreachable, so refetch (#7970).
-          runtimeProjectRefreshScheduler.request(environmentId)
-          // Why: sshStateChanged events during the transport gap are lost, so downgrade the possibly-stale bucket, then refetch.
-          useAppStore.getState().markEnvironmentSshStateStale(environmentId)
-          void hydrateRuntimeEnvironmentSshState(environmentId, { force: true }).catch(() => {})
+          invalidateRuntimeClientEventReplay({
+            getSshStateReference: () => useAppStore.getState().sshStateByEnvironment,
+            requestProjectRefresh: () => runtimeProjectRefreshScheduler.request(environmentId),
+            markEnvironmentSshStateStale: () =>
+              useAppStore.getState().markEnvironmentSshStateStale(environmentId),
+            hydrateEnvironmentSshState: () =>
+              hydrateRuntimeEnvironmentSshState(environmentId, { force: true }),
+            sync: runtimeClientEventsSync.sync
+          })
         }
       )
     },
     onEvent: handleRuntimeClientEvent
   })
 
-  runtimeClientEventsSync.sync()
   // Why: no on-connect repo fetch (PR #2); seed discovery for connected runtimes or remote projects hide until Add-Project.
-  let runtimeClientEventEnvironmentIds = getRuntimeClientEventEnvironmentIds()
+  const initialRuntimeEnvironmentState = useAppStore.getState()
+  const runtimeClientEventEnvironmentIds = getRuntimeClientEventEnvironmentIds(
+    initialRuntimeEnvironmentState
+  )
   for (const environmentId of runtimeClientEventEnvironmentIds) {
     runtimeProjectRefreshScheduler.request(environmentId)
   }
-  let runtimeClientEventEnvironmentKey = buildRuntimeClientEventEnvironmentKey(
-    runtimeClientEventEnvironmentIds
+  const reachableRuntimeEnvironmentIds = getReachableRuntimeEnvironmentIds(
+    initialRuntimeEnvironmentState
   )
-  let reachableRuntimeEnvironmentIds = getReachableRuntimeEnvironmentIds()
-  let reachableRuntimeEnvironmentKey = buildRuntimeClientEventEnvironmentKey(
-    reachableRuntimeEnvironmentIds
-  )
-  const unsubscribeRuntimeEnvironmentStore = useAppStore.subscribe(() => {
-    const nextEnvironmentIds = getRuntimeClientEventEnvironmentIds()
-    const nextKey = buildRuntimeClientEventEnvironmentKey(nextEnvironmentIds)
-    const nextReachableEnvironmentIds = getReachableRuntimeEnvironmentIds()
-    const nextReachableKey = buildRuntimeClientEventEnvironmentKey(nextReachableEnvironmentIds)
-    if (
-      nextKey === runtimeClientEventEnvironmentKey &&
-      nextReachableKey === reachableRuntimeEnvironmentKey
-    ) {
-      return
-    }
-    for (const environmentId of getRuntimeProjectRefreshEnvironmentIds({
-      previousDesired: runtimeClientEventEnvironmentIds,
-      nextDesired: nextEnvironmentIds,
-      previousReachable: reachableRuntimeEnvironmentIds,
-      nextReachable: nextReachableEnvironmentIds
-    })) {
-      runtimeProjectRefreshScheduler.request(environmentId)
-    }
-    for (const environmentId of getNewlyDisconnectedRuntimeEnvironmentIds(
-      reachableRuntimeEnvironmentIds,
-      nextReachableEnvironmentIds
-    )) {
+  const handleRuntimeEnvironmentStoreWrite = createRuntimeEnvironmentStoreSyncSubscriber({
+    initialDesiredEnvironmentIds: runtimeClientEventEnvironmentIds,
+    initialReachableEnvironmentIds: reachableRuntimeEnvironmentIds,
+    buildEnvironmentKey: buildRuntimeClientEventEnvironmentKey,
+    getDesiredEnvironmentIds: getRuntimeClientEventEnvironmentIds,
+    getReachableEnvironmentIds: getReachableRuntimeEnvironmentIds,
+    requestProjectRefresh: (environmentId) =>
+      // The scheduler coalesces bursts per environment.
+      runtimeProjectRefreshScheduler.request(environmentId),
+    markEnvironmentSshStateStale: (environmentId) => {
       // No-op when the environment has no SSH bucket (e.g. web client).
       useAppStore.getState().markEnvironmentSshStateStale(environmentId)
-    }
-    runtimeClientEventEnvironmentIds = nextEnvironmentIds
-    runtimeClientEventEnvironmentKey = nextKey
-    reachableRuntimeEnvironmentIds = nextReachableEnvironmentIds
-    reachableRuntimeEnvironmentKey = nextReachableKey
-    runtimeClientEventsSync.sync()
+    },
+    sync: runtimeClientEventsSync.sync
   })
+  const unsubscribeRuntimeEnvironmentStore = useAppStore.subscribe(
+    handleRuntimeEnvironmentStoreWrite
+  )
+  // Subscribe before the first runtime stream starts: replay invalidation may
+  // synchronously publish a tracked SSH bucket and relies on this listener to
+  // replace that subscription exactly once.
+  runtimeClientEventsSync.sync()
   unsubs.push(runtimeClientEventsSync.stop)
   unsubs.push(runtimeProjectRefreshScheduler.stop)
 
