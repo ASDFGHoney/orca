@@ -62,12 +62,24 @@ function nextSubscriptionId(): string {
 }
 
 // Why: a new session's transcript can take minutes to appear on disk (#8401).
-const NOTFOUND_RETRY_WINDOW_MS = 60_000
+// Only a guess at the flush delay — a host that reports the transcript pending
+// overrides it outright. Exported for tests.
+export const NOTFOUND_RETRY_WINDOW_MS = 60_000
 
 export type ReadState =
   | { phase: 'loading' }
+  /** The host reported no transcript behind this window yet: rendered, but not a
+   *  settled read, so nothing may treat the empty list as real history. */
+  | { phase: 'awaiting' }
   | { phase: 'ready'; messages: NativeChatMessage[] }
   | { phase: 'error'; error: string }
+
+/** True while no transcript read has settled — 'loading' and 'awaiting' alike.
+ *  Consumers that must not act on `messages` as real history use this, not a
+ *  bare `!== 'ready'`, which would also swallow the error surface. */
+export function isNativeChatTranscriptUnsettled(phase: ReadState['phase']): boolean {
+  return phase === 'loading' || phase === 'awaiting'
+}
 
 /**
  * Renderer hook that streams a NativeChatSession for a pane: windowed
@@ -156,6 +168,9 @@ export function useNativeChatLiveSession(
     let cancelled = false
     // Set by the first authoritative frame so the readSession seed below can't clobber a live snapshot.
     let frameArrived = false
+    // Set once the host reports no transcript on disk yet, which makes a notFound
+    // read known-good news rather than a failure worth surfacing.
+    let transcriptPending = false
     const retryTimer = createNativeChatReadRetryTimer()
     const retryStartedAt = Date.now()
     // Re-bound as a const: TS drops the `!sessionId` narrowing inside the hoisted nested function.
@@ -181,8 +196,14 @@ export function useNativeChatLiveSession(
             return
           }
           if (result && 'error' in result) {
-            // A not-yet-flushed transcript: stay in 'loading' and retry with backoff instead of a permanent error (#8401).
-            if (result.notFound && Date.now() - retryStartedAt < NOTFOUND_RETRY_WINDOW_MS) {
+            // A not-yet-flushed transcript: stay unsettled and retry with backoff instead of a permanent error (#8401).
+            // The window is a guess at how long a flush takes; once the host has said the
+            // transcript is pending we know it, so a never-prompted session never expires
+            // into an error card.
+            if (
+              result.notFound &&
+              (transcriptPending || Date.now() - retryStartedAt < NOTFOUND_RETRY_WINDOW_MS)
+            ) {
               retryTimer.schedule(attempt, () => loadSession(attempt + 1))
               return
             }
@@ -224,6 +245,14 @@ export function useNativeChatLiveSession(
           if ('error' in frame && frame.error) {
             // Why: an error frame carries no transcript, so it must not consume the seed — a healthy read still has to repair the pane.
             setRead({ phase: 'error', error: frame.error })
+            return
+          }
+          if (frame.type === 'snapshot' && frame.pending === true) {
+            // No transcript exists yet (an agent that hasn't flushed, or was never
+            // prompted). Move off 'loading' so the view stops spinning, but keep
+            // the seed loop armed and the appended tail intact — this is not a read.
+            transcriptPending = true
+            setRead({ phase: 'awaiting' })
             return
           }
           frameArrived = true

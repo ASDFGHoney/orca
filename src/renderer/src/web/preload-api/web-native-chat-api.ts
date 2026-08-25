@@ -70,8 +70,11 @@ export function createWebNativeChatApi(): NativeChatApi {
                 hasMore?: boolean
                 error?: string
                 lifecycle?: unknown
+                pending?: boolean
               }
               const lifecycle = parseRuntimeNativeChatTurnLifecycle(result?.lifecycle)
+              // No transcript behind this window yet — forwarded so the view can stop spinning, but it is not the settled initial read.
+              const pending = result?.pending === true
               if (
                 (result?.type === 'appended' ||
                   result?.type === 'snapshot' ||
@@ -79,13 +82,16 @@ export function createWebNativeChatApi(): NativeChatApi {
                 Array.isArray(result.messages)
               ) {
                 if (!receivedInitial) {
-                  receivedInitial = true
+                  if (!pending) {
+                    receivedInitial = true
+                  }
                   onFrame({
                     type: 'snapshot',
                     messages: result.messages,
                     hasMore: result.hasMore ?? result.messages.length >= (args.limit ?? 300),
                     ...(result.error ? { error: result.error } : {}),
-                    ...(lifecycle ? { lifecycle } : {})
+                    ...(lifecycle ? { lifecycle } : {}),
+                    ...(pending ? { pending: true } : {})
                   })
                 } else if (result.type === 'snapshot') {
                   onFrame({
@@ -93,7 +99,8 @@ export function createWebNativeChatApi(): NativeChatApi {
                     messages: result.messages,
                     hasMore: result.hasMore ?? false,
                     ...(result.error ? { error: result.error } : {}),
-                    ...(lifecycle ? { lifecycle } : {})
+                    ...(lifecycle ? { lifecycle } : {}),
+                    ...(pending ? { pending: true } : {})
                   })
                 } else {
                   onFrame(

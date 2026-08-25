@@ -288,6 +288,14 @@ export const NATIVE_CHAT_METHODS: readonly RpcAnyMethod[] = [
             ...(lifecycle ? { lifecycle } : {})
           })
         },
+        onTranscriptPending: () => {
+          if (closed) {
+            return
+          }
+          // `pending` marks a window with no transcript behind it yet; clients
+          // that don't know the flag still stop spinning on the empty snapshot.
+          emit({ type: 'snapshot', messages: [], hasMore: false, pending: true })
+        },
         onReplace: (messages, hasMore, beforeOffset, lifecycle) => {
           if (closed) {
             return
