@@ -10867,6 +10867,10 @@ export class OrcaRuntimeService {
       leafId: string
       incarnationId?: PtyIncarnationId
       agentLaunchAuthority?: { launchToken: string; launchAgent: TuiAgent }
+      providerReattachLaunchIdentity?: {
+        incarnationId: PtyIncarnationId
+        launchAgent: TuiAgent
+      }
     },
     isWsl?: boolean
   ): void {
@@ -10904,6 +10908,18 @@ export class OrcaRuntimeService {
       pty.launchToken = agentLaunchAuthority.launchToken
       pty.launchIncarnationId = binding.incarnationId
       pty.launchAgent = agentLaunchAuthority.launchAgent
+    }
+    const providerReattachLaunchIdentity = binding?.providerReattachLaunchIdentity
+    if (
+      providerReattachLaunchIdentity &&
+      paneKey &&
+      binding.incarnationId === providerReattachLaunchIdentity.incarnationId &&
+      pty.incarnationId === providerReattachLaunchIdentity.incarnationId &&
+      pty.paneKey === paneKey &&
+      isTuiAgent(providerReattachLaunchIdentity.launchAgent)
+    ) {
+      // Why: daemon metadata owns the surviving process; its incarnation fence restores identity without minting renderer launch authority.
+      pty.launchAgent = providerReattachLaunchIdentity.launchAgent
     }
     const pendingIncarnation = this.pendingPtyRegistrationIncarnations.get(ptyId)
     if (
@@ -33180,11 +33196,7 @@ export class OrcaRuntimeService {
       preview: leaf.preview,
       ...(leaf.lastExitCause ? { exitCause: leaf.lastExitCause } : {}),
       ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId),
-      ...this.resolvePaneAgentIdentityField(
-        pty?.launchAgent,
-        pty?.foregroundAgent,
-        title
-      )
+      ...this.resolvePaneAgentIdentityField(pty?.launchAgent, pty?.foregroundAgent, title)
     }
   }
 
@@ -35165,11 +35177,7 @@ export class OrcaRuntimeService {
       preview: pty.preview,
       ...(pty.lastExitCause ? { exitCause: pty.lastExitCause } : {}),
       ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId),
-      ...this.resolvePaneAgentIdentityField(
-        pty.launchAgent,
-        pty.foregroundAgent,
-        title
-      )
+      ...this.resolvePaneAgentIdentityField(pty.launchAgent, pty.foregroundAgent, title)
     }
   }
 
