@@ -119,4 +119,128 @@ describe('structured session live TUI restart survival', () => {
       ownerProcess: process
     })
   })
+
+  it('persists the provider leaf returned by Claude re-proof before clearing recovery', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'orca-claude-tui-restart-'))
+    roots.push(root)
+    const sessionId = 'session-claude-live-tui-restart'
+    const store = await AgentSessionRecordStore.open({ directory: root, hostId: 'local' })
+    const reserved = await store.reserveOwner({
+      sessionId,
+      location: {
+        executionHostId: 'local',
+        wslDistro: null,
+        workspaceId: 'workspace-1',
+        workspaceKind: 'git-worktree'
+      },
+      provider: 'claude',
+      accountHome: { variable: 'CLAUDE_CONFIG_DIR', path: join(root, 'claude-home') },
+      runtimeKind: 'tui',
+      expectedFence: null,
+      spawnToken: 'claude-tui-spawn',
+      claimKeyId: 'key-1',
+      handoffOperationId: null,
+      probe: { outcome: 'reservation-unused' },
+      operation: {
+        callerKey: 'test',
+        operationId: `${NOW}-00000000000000000000000000000001`,
+        fingerprint: 'create'
+      },
+      now: NOW
+    })
+    const process = {
+      hostId: 'local',
+      pid: 4201,
+      processStartTimeMs: NOW - 1_000,
+      spawnToken: 'claude-tui-spawn'
+    }
+    await store.commitProcessIdentity({
+      sessionId,
+      fence: reserved.record.lease.runtimeFence,
+      process,
+      now: NOW
+    })
+    const record = await store.proveOwner({
+      sessionId,
+      fence: reserved.record.lease.runtimeFence,
+      link: {
+        linkId: 'claude-created-link',
+        handle: { provider: 'claude', sessionId: 'claude-session', leafUuid: 'leaf-before' },
+        origin: 'created',
+        mintedAtFence: reserved.record.lease.runtimeFence,
+        observedAt: NOW
+      },
+      now: NOW
+    })
+    await setStoredAgentSessionHandoffStage(store, {
+      sessionId,
+      fence: record.lease.runtimeFence,
+      stage: 'manual-recovery',
+      handoffOperationId: null,
+      now: NOW
+    })
+
+    const reproofed = {
+      terminal: {
+        handle: 'term-claude',
+        tabId: 'tab-claude',
+        paneKey: 'tab-claude:leaf-claude',
+        ptyId: 'pty-claude'
+      },
+      process,
+      link: {
+        linkId: 'claude-resumed-link',
+        handle: {
+          provider: 'claude' as const,
+          sessionId: 'claude-session',
+          leafUuid: 'leaf-after'
+        },
+        origin: 'resumed' as const,
+        mintedAtFence: record.lease.runtimeFence,
+        observedAt: NOW + 1
+      },
+      transcriptPath: join(root, 'claude-home', 'projects', 'session.jsonl')
+    }
+    const persistTuiProviderHandle = vi.fn(async () => undefined)
+    const coordinator = new StructuredAgentSessionHandoffCoordinator({
+      store,
+      claimKeyId: 'key-1',
+      transport: {
+        hostLabel: 'Test host',
+        launchTui: vi.fn(),
+        recoverTuiOwner: vi.fn(async () => ({
+          ...reproofed,
+          link: record.providerHandleChain.at(-1)!
+        })),
+        reproveTuiOwner: vi.fn(async () => reproofed),
+        probeRecoveredOwner: async () => 'live',
+        stopRecoveredOwner: vi.fn(),
+        waitForTuiExit: vi.fn(),
+        waitForTuiIdleOrExit: vi.fn(),
+        tuiStatus: () => 'idle'
+      },
+      persistTuiProviderHandle,
+      session: vi.fn() as never,
+      suspendNative: vi.fn(),
+      acquireNative: vi.fn(),
+      importTuiHistory: vi.fn(),
+      publish: vi.fn(),
+      schedule: async (_sessionId, task) => task(),
+      now: () => NOW
+    })
+
+    await coordinator.restore(sessionId)
+
+    expect(persistTuiProviderHandle).toHaveBeenCalledWith({
+      sessionId,
+      link: reproofed.link,
+      now: NOW
+    })
+    expect(coordinator.status(sessionId)).toMatchObject({ owner: 'tui', phase: 'idle' })
+    expect(store.getRecord(sessionId)?.lease).toMatchObject({
+      runtimeKind: 'tui',
+      claimStatus: 'live',
+      handoffStage: null
+    })
+  })
 })

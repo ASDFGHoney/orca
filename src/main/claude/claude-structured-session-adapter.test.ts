@@ -148,7 +148,8 @@ function adapterFor(
   launch: Partial<ClaudeStructuredLaunch> = {},
   events: ClaudeStructuredSessionEvent[] = [],
   persistedHandles: unknown[] = [],
-  initTimeoutMs?: number
+  initTimeoutMs?: number,
+  persistError?: Error
 ): ClaudeStructuredSessionAdapter {
   return new ClaudeStructuredSessionAdapter({
     resolveLaunch: async () => ({
@@ -169,6 +170,9 @@ function adapterFor(
     dispatchAckTimeoutMs: 10,
     persistHandle: async (handle) => {
       persistedHandles.push(handle)
+      if (persistError) {
+        throw persistError
+      }
     }
   })
 }
@@ -669,5 +673,22 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
       fence: 7
     })
     expect(claude.connections[0].closeCount).toBe(1)
+  })
+
+  it('closes the provider even when durable handle persistence fails', async () => {
+    const claude = fakeClaude()
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = adapterFor(claude, {}, events, [], undefined, new Error('journal unavailable'))
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    await expect(adapter.closeSession('session-1')).rejects.toThrow('journal unavailable')
+
+    expect(claude.connections[0].closeCount).toBe(1)
+    expect(events.at(-1)).toEqual({
+      type: 'ended',
+      sessionId: 'session-1',
+      reason: 'claude session closed'
+    })
+    await expect(adapter.closeSession('session-1')).resolves.toBeUndefined()
   })
 })

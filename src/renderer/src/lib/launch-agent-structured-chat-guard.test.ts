@@ -6,6 +6,7 @@ const mockWaitForAgentReady = vi.fn()
 const mockPasteDraftWhenAgentReady = vi.fn()
 const mockMarkNativeChatLaunchPromptFailed = vi.fn()
 const mockLaunchStructuredCodexSession = vi.fn()
+const mockToastError = vi.fn()
 
 const store = {
   activeRepoId: 'repo-1',
@@ -46,7 +47,7 @@ const store = {
 }
 
 vi.mock('@/store', () => ({ useAppStore: { getState: () => store } }))
-vi.mock('sonner', () => ({ toast: { message: vi.fn(), error: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { message: vi.fn(), error: mockToastError } }))
 vi.mock('@/components/tab-bar/reconcile-order', () => ({ reconcileTabOrder: vi.fn(() => []) }))
 vi.mock('@/lib/agent-paste-draft', () => ({
   pasteDraftWhenAgentReady: mockPasteDraftWhenAgentReady
@@ -78,6 +79,7 @@ describe('structured chat adoption guard on the launch path', () => {
     mockWaitForAgentReady.mockResolvedValue({ ready: true, reason: 'foreground-match' })
     mockPasteDraftWhenAgentReady.mockResolvedValue(true)
     mockLaunchStructuredCodexSession.mockResolvedValue('codex-session-1')
+    mockToastError.mockReset()
   })
 
   it('honors the persisted chat default by launching Codex directly as a structured session', async () => {
@@ -89,6 +91,22 @@ describe('structured chat adoption guard on the launch path', () => {
     expect(mockLaunchStructuredCodexSession).toHaveBeenCalledWith('wt-1')
     expect(mockCreateTab).not.toHaveBeenCalled()
     expect(mockWaitForAgentReady).not.toHaveBeenCalled()
+  })
+
+  it('surfaces a direct structured launch failure instead of silently doing nothing', async () => {
+    mockLaunchStructuredCodexSession.mockRejectedValueOnce(new Error('provider unavailable'))
+    const { launchAgentInNewTab } = await import('./launch-agent-in-new-tab')
+
+    const result = launchAgentInNewTab({ agent: 'codex', worktreeId: 'wt-1' })
+
+    expect(result).toMatchObject({ tabId: null, pasteDraftAfterLaunch: false })
+    await vi.waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(
+        'Could not open Codex chat',
+        expect.objectContaining({ description: 'provider unavailable' })
+      )
+    )
+    expect(mockCreateTab).not.toHaveBeenCalled()
   })
 
   it('stays in terminal view when Codex never became ready', async () => {
