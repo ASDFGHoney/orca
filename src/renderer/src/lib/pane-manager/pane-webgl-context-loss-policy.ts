@@ -15,6 +15,10 @@ export function prunePaneWebglContextLosses(pane: ManagedPaneInternal, now = Dat
   return losses.length
 }
 
+export function countPaneWebglContextLosses(pane: ManagedPaneInternal, now = Date.now()): number {
+  return recentContextLosses(pane, now).length
+}
+
 export function recordPaneWebglContextLoss(pane: ManagedPaneInternal, now = Date.now()): number {
   const losses = recentContextLosses(pane, now)
   losses.push(now)

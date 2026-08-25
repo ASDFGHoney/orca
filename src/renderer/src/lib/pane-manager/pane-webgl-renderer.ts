@@ -341,10 +341,6 @@ export function attachWebgl(pane: ManagedPaneInternal): void {
       // once, and the crash-report ring coalesces repeats, so the count has to
       // be in the payload rather than in the number of crumbs.
       const census = getLivePaneCensus()
-      // Why: Chromium starts reclaiming terminal contexts under pressure.
-      // Recreating WebGL for this pane can loop context loss and leave xterm
-      // visually blank, so keep the pane on the DOM renderer until the next
-      // rendering resume (worktree foreground / window wake) retries it.
       const lossesInWindow = recordPaneWebglContextLoss(pane)
       recordTerminalWebglDiagnostic('webgl-context-loss', {
         paneId: pane.id,
@@ -352,6 +348,8 @@ export function attachWebgl(pane: ManagedPaneInternal): void {
         livePanes: census.panes,
         livePaneManagers: census.managers
       })
+      // Why: context loss switches this pane to DOM until the next resume or
+      // settled reveal; the bounded loss window refuses unstable retries.
       pane.webglDisabledAfterContextLoss = true
       disposeWebgl(pane, { refreshDimensions: true })
     })

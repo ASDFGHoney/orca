@@ -1,6 +1,6 @@
 import type { ManagedPaneInternal, PaneRenderingDiagnostics } from './pane-manager-types'
 import { getTerminalWebglAutoDecision } from './terminal-webgl-auto-policy'
-import { prunePaneWebglContextLosses } from './pane-webgl-context-loss-policy'
+import { countPaneWebglContextLosses } from './pane-webgl-context-loss-policy'
 
 export function collectPaneRenderingDiagnostics(
   panes: Map<number, ManagedPaneInternal>
@@ -11,7 +11,7 @@ export function collectPaneRenderingDiagnostics(
     gpuRenderingEnabled: pane.gpuRenderingEnabled,
     webglAttachmentDeferred: pane.webglAttachmentDeferred,
     webglDisabledAfterContextLoss: pane.webglDisabledAfterContextLoss,
-    webglContextLossesInWindow: prunePaneWebglContextLosses(pane),
+    webglContextLossesInWindow: countPaneWebglContextLosses(pane),
     webglAttachFailedSinceRecovery: pane.webglAttachFailedSinceRecovery === true,
     hasComplexScriptOutput: pane.hasComplexScriptOutput,
     terminalWebglAutoDecision: getTerminalWebglAutoDecision(),

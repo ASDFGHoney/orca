@@ -3,6 +3,7 @@ import { setTerminalWebglDiagnosticRecorder } from '../../../../shared/terminal-
 import type { ManagedPaneInternal } from './pane-manager-types'
 import { resumePaneRendering, suspendPaneRendering } from './pane-rendering-control'
 import { collectPaneRenderingDiagnostics } from './pane-rendering-diagnostics'
+import { schedulePaneRevealPresent } from './pane-reveal-repaint'
 import { attachWebgl, resetTerminalWebglSuggestion } from './pane-webgl-renderer'
 import { rebuildAttachedWebgl } from './pane-webgl-reattach'
 
@@ -169,7 +170,7 @@ describe('terminal WebGL context recovery', () => {
     expect(pane.webglAddon).toBeNull()
   })
 
-  it('stops reveal and resume retries after repeated losses in the retry window', () => {
+  it('stops resume retries after repeated losses in the retry window', () => {
     const pane = createPane()
 
     attachWebgl(pane)
@@ -184,6 +185,23 @@ describe('terminal WebGL context recovery', () => {
     expect(pane.webglAddon).toBeNull()
 
     resumePaneRendering([pane])
+
+    expect(pane.webglDisabledAfterContextLoss).toBe(true)
+    expect(pane.webglAddon).toBeNull()
+    expect(pane.terminal.loadAddon).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops reveal retries after repeated losses in the retry window', () => {
+    const pane = createPane()
+
+    attachWebgl(pane)
+    fireContextLoss(pane)
+    resumePaneRendering([pane])
+    fireContextLoss(pane)
+    resumePaneRendering([pane])
+    fireContextLoss(pane)
+
+    schedulePaneRevealPresent(() => [pane])
 
     expect(pane.webglDisabledAfterContextLoss).toBe(true)
     expect(pane.webglAddon).toBeNull()
@@ -227,6 +245,6 @@ describe('terminal WebGL context recovery', () => {
     const [diagnostics] = collectPaneRenderingDiagnostics(new Map([[pane.id, pane]]))
 
     expect(diagnostics.webglContextLossesInWindow).toBe(1)
-    expect(pane.webglContextLossTimestamps).toEqual([now - 1_000])
+    expect(pane.webglContextLossTimestamps).toEqual([now - 60_001, now - 1_000])
   })
 })
