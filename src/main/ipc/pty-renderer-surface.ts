@@ -14,9 +14,25 @@ import type { BrowserWindow, WebContents } from 'electron'
  * already guards on `isDestroyed()` and skips — so model it as `null` and say so.
  */
 
-/** True when there is no renderer, or it is gone. Callers already treat these the same. */
+/**
+ * True when there is no renderer, or it is gone. Callers already treat these the same.
+ *
+ * Why webContents is checked separately (STA-2373, re-broken by #15927 as STA-5373): a
+ * window can be alive while its webContents is already destroyed — teardown, a renderer
+ * crash, a reload in flight. `webContents.send()` then THROWS, and the daemon-death
+ * fan-out that calls it is not inside a try/catch, so an uncaught throw in the main
+ * process kills the whole app and every terminal with it.
+ *
+ * Why the typeof guard: preserved from the original fix — a stubbed or partially torn
+ * down webContents may not expose the method, and this must never be the thing that
+ * throws.
+ */
 export function isRendererGone(window: BrowserWindow | null): boolean {
-  return window === null || window.isDestroyed()
+  if (window === null || window.isDestroyed()) {
+    return true
+  }
+  const contents = window.webContents as WebContents | undefined
+  return !contents || (typeof contents.isDestroyed === 'function' && contents.isDestroyed())
 }
 
 /** Send to the renderer if one is listening. Absent renderer drops the message, as a destroyed one does. */
