@@ -5,9 +5,16 @@ import { isShellProcess } from '../../shared/shell-process-detection'
  *
  * The job is a SUPERSET of the console: it keeps console-detached descendants,
  * so "something besides the shell is alive" cannot tell a working agent from a
- * leftover. A WSL pane always has some, so treating that as proof of life pins
- * a dead agent's name forever (#9258's bug, reached by a new route). Age is the
- * tiebreak. 5x the renderer's 6s confirm ladder.
+ * leftover. Any pane that keeps one -- and whose fallback name reads as a shell
+ * -- would otherwise pin a dead agent's name forever (#9258's bug, reached by a
+ * new route). Age is the tiebreak.
+ *
+ * The invariant both callers must preserve: every successful recognition resets
+ * the clock, so this can only expire an identity no scan has confirmed for this
+ * long. It is never a timeout on a live agent.
+ *
+ * 5x the renderer's 6s confirm ladder, and bounded above by the fact that a
+ * stale cache also pins the refresh at the 1s TTL until it clears.
  */
 export const WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS = 30_000
 

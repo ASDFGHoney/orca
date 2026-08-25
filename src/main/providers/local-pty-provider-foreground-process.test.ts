@@ -281,6 +281,43 @@ describe('LocalPtyProvider', () => {
       }
     })
 
+    it('keeps short-circuiting a live agent instead of scanning on every call', async () => {
+      // The age bound must mean "time since we last confirmed the agent", not
+      // "how long the agent has run". Stamping only on a CHANGE of name makes a
+      // steadily-recognized agent age out permanently: the short-circuit dies
+      // after 30s, every call runs the whole-table scan, and one available-but-
+      // agentless snapshot then deletes a LIVE agent -- the false "agent done"
+      // #9258 exists to prevent.
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+      mockProc.process = 'powershell.exe'
+      resolveAgentForegroundProcessMock.mockResolvedValue({
+        available: true,
+        processName: 'claude'
+      })
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345, 999]))
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        vi.setSystemTime(1_000_000)
+        const { id } = await provider.spawn({ cols: 80, rows: 24 })
+
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(1)
+
+        // Past the bound: one revalidating scan is expected, and it re-confirms.
+        vi.setSystemTime(1_000_000 + 40_000)
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(2)
+
+        // That confirmation must restart the clock, so the short-circuit resumes.
+        vi.setSystemTime(1_000_000 + 45_000)
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('falls through to the scan when the job holds only the shell', async () => {
       Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
       mockProc.process = 'powershell.exe'

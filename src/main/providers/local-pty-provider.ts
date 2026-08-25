@@ -1473,9 +1473,10 @@ export class LocalPtyProvider implements IPtyProvider {
         lastRecognizedAgent
       )
       if (stable.lastRecognizedAgent) {
-        if (ptyLastRecognizedForeground.get(id) !== stable.lastRecognizedAgent) {
-          ptyLastRecognizedForegroundAt.set(id, Date.now())
-        }
+        // Every confirmation restarts the clock: the bound means "time since we
+        // last saw the agent", not "how long it has run". Stamping only on a
+        // change would age out a live agent that keeps being recognized.
+        ptyLastRecognizedForegroundAt.set(id, Date.now())
         ptyLastRecognizedForeground.set(id, stable.lastRecognizedAgent)
       } else {
         ptyLastRecognizedForeground.delete(id)
