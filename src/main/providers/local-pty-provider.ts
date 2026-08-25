@@ -67,7 +67,10 @@ import { killWithDescendantSweep } from '../pty-descendant-termination'
 import { readWindowsPtyJobProcessIds } from './windows-pty-job-membership'
 import { readWindowsConsoleAttachedProcessIds } from './windows-console-attached-processes'
 import { terminatePtyJob } from '../windows/windows-pty-job'
-import { canRevalidateCachedAgentWithoutScan } from './windows-cached-agent-revalidation'
+import {
+  canRevalidateCachedAgentWithoutScan,
+  WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS
+} from './windows-cached-agent-revalidation'
 import { forceKillPosixPtyProcessGroups } from '../pty/posix-pty-process-groups'
 import { shouldUseShellReadyStartupDelivery } from '../../shared/codex-startup-delivery'
 import { assertSafeAgentStartupCwd, resolveSafePtyDefaultCwd } from './pty-default-cwd'
@@ -122,6 +125,9 @@ const ptyShellName = new Map<string, string>()
 const ptyAgentForegroundContextPaths = new Map<string, string[]>()
 // Why: remember the last recognized agent foreground so a degraded scan doesn't report the shell and look like an exit.
 const ptyLastRecognizedForeground = new Map<string, string>()
+// When each entry above was last confirmed by a scan, so job evidence -- which is
+// only a superset -- cannot keep it alive indefinitely.
+const ptyLastRecognizedForegroundAt = new Map<string, number>()
 const ptyTerminalHandle = new Map<string, string>()
 const ptyWorktreeId = new Map<string, string>()
 const ptyInitialCwd = new Map<string, string>()
@@ -281,6 +287,7 @@ function clearPtyState(id: string): void {
   ptyShellName.delete(id)
   ptyAgentForegroundContextPaths.delete(id)
   ptyLastRecognizedForeground.delete(id)
+  ptyLastRecognizedForegroundAt.delete(id)
   ptyTerminalHandle.delete(id)
   ptyWorktreeId.delete(id)
   ptyInitialCwd.delete(id)
@@ -1401,6 +1408,7 @@ export class LocalPtyProvider implements IPtyProvider {
     const proc = ptyProcesses.get(id)
     if (!proc) {
       ptyLastRecognizedForeground.delete(id)
+      ptyLastRecognizedForegroundAt.delete(id)
       return null
     }
     const fallbackProcess = resolveForegroundFallbackProcess(
@@ -1422,7 +1430,17 @@ export class LocalPtyProvider implements IPtyProvider {
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
-        if (paneProcessIds !== null && paneProcessIds.size > 1 && cachedAgent !== null) {
+        // Why the age bound: `size > 1` is a superset answer, not proof of life.
+        // A WSL pane keeps console-detached plumbing in its job, so this
+        // short-circuit was permanent there and the scan below -- the only path
+        // that can clear the cache -- never ran again. Fall through once stale.
+        const cachedAgentAgeMs = Date.now() - (ptyLastRecognizedForegroundAt.get(id) ?? 0)
+        if (
+          paneProcessIds !== null &&
+          paneProcessIds.size > 1 &&
+          cachedAgent !== null &&
+          cachedAgentAgeMs <= WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS
+        ) {
           return cachedAgent
         }
         paneMembershipUnavailable = paneProcessIds === null
@@ -1455,9 +1473,13 @@ export class LocalPtyProvider implements IPtyProvider {
         lastRecognizedAgent
       )
       if (stable.lastRecognizedAgent) {
+        if (ptyLastRecognizedForeground.get(id) !== stable.lastRecognizedAgent) {
+          ptyLastRecognizedForegroundAt.set(id, Date.now())
+        }
         ptyLastRecognizedForeground.set(id, stable.lastRecognizedAgent)
       } else {
         ptyLastRecognizedForeground.delete(id)
+        ptyLastRecognizedForegroundAt.delete(id)
       }
       return stable.processName
     } catch {

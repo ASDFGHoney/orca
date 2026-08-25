@@ -228,14 +228,14 @@ describe('LocalPtyProvider', () => {
       await expect(foreground).resolves.toBeNull()
     })
 
-    it('confirms a still-active agent from ConPTY console presence without a whole-table scan', async () => {
+    it('confirms a still-active agent from job membership without a whole-table scan', async () => {
       Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
       mockProc.process = 'powershell.exe'
       resolveAgentForegroundProcessMock.mockResolvedValue({
         available: true,
         processName: 'claude'
       })
-      // A child beyond the shell is still attached to this console.
+      // A descendant beyond the shell is still in the pane's job.
       readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345, 999]))
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
@@ -247,7 +247,41 @@ describe('LocalPtyProvider', () => {
       expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(1)
     })
 
-    it('falls through to the scan when the ConPTY console shows only the shell', async () => {
+    it('stops trusting job membership once the cached agent goes stale', async () => {
+      // The daemon path is not the only one that short-circuited on `size > 1`.
+      // Here the early return skips the scan that is the ONLY thing able to
+      // clear ptyLastRecognizedForeground, so on a WSL pane -- whose job always
+      // holds console-detached plumbing -- the identity was pinned for good.
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+      mockProc.process = 'powershell.exe'
+      resolveAgentForegroundProcessMock.mockResolvedValue({
+        available: true,
+        processName: 'claude'
+      })
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345, 999]))
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        vi.setSystemTime(1_000_000)
+        const { id } = await provider.spawn({ cols: 80, rows: 24 })
+
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
+        expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(1)
+
+        // Past the bound, the superset answer stops standing in for a scan.
+        vi.setSystemTime(1_000_000 + 40_000)
+        resolveAgentForegroundProcessMock.mockResolvedValue({
+          available: true,
+          processName: 'powershell.exe'
+        })
+        await expect(provider.getForegroundProcess(id)).resolves.toBe('powershell.exe')
+        expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('falls through to the scan when the job holds only the shell', async () => {
       Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
       mockProc.process = 'powershell.exe'
       resolveAgentForegroundProcessMock.mockResolvedValue({

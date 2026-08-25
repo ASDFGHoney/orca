@@ -2,6 +2,7 @@ import type * as pty from 'node-pty'
 import { win32 as pathWin32 } from 'node:path'
 import { getAgentForegroundContextPaths } from '../../providers/agent-foreground-context-paths'
 import { resolveAgentForegroundProcessWithAvailability } from '../../providers/agent-foreground-process'
+import { WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS } from '../../providers/windows-cached-agent-revalidation'
 import { readWindowsPtyJobProcessIds } from '../../providers/windows-pty-job-membership'
 import { readWindowsConsoleAttachedProcessIds } from '../../providers/windows-console-attached-processes'
 import {
@@ -16,11 +17,6 @@ import { parsePtySessionId } from '../pty-session-id'
 const FOREGROUND_AGENT_CACHE_TTL_MS = 1000
 const SHELL_FOREGROUND_REFRESH_RETRY_MS = 5_000
 const WINDOWS_IDLE_SHELL_FOREGROUND_REFRESH_RETRY_MS = 15_000
-// Why 30s: the job answers a SUPERSET of the console, so "something else is
-// alive" cannot tell a working agent from a console-detached leftover. Age is
-// the tiebreak, and only successful scans that found no agent advance it (an
-// unavailable scan returns before this). 5x the renderer's 6s confirm ladder.
-const WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS = 30_000
 const SHELL_FOREGROUND_OUTPUT_HOT_WINDOW_MS = 10_000
 const STARTUP_AGENT_FOREGROUND_BOOTSTRAP_MS = 5_000
 
