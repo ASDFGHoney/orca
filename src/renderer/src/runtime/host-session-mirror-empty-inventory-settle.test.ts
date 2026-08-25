@@ -13,6 +13,7 @@
  * session-tab mirror — so an empty mirror plus a live PTY is a THIRD state.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 
 // Why: web-session-tabs-sync imports the app-level store singleton, and this
 // suite drives only the settle receipt — no store patch is exercised.
@@ -30,6 +31,10 @@ import {
   parkUntilHostSessionMirrorHydrates,
   resetHostSessionMirrorHydrationForTests
 } from './host-session-mirror-hydration'
+import {
+  clearHostLiveTerminalProbesForTests,
+  probeHostLiveTerminals
+} from './host-live-terminal-probe'
 import { applyWebSessionTabsStorePatch } from './web-session-tabs-sync'
 
 const WORKTREE = 'repo1::/path/wt1'
@@ -37,7 +42,10 @@ const WORKTREE = 'repo1::/path/wt1'
 type HostCall = { method: string; params: Record<string, unknown> }
 
 /** `null` models a failed probe: `unverifiable`, never `the host has none`. */
-function stubPairedHost(liveTerminalHandles: readonly string[] | null): HostCall[] {
+function stubPairedHost(
+  liveTerminalHandles: readonly string[] | null,
+  omittedHostIds: readonly string[] = []
+): HostCall[] {
   const calls: HostCall[] = []
   const call = vi.fn(async (args: { method: string; params: Record<string, unknown> }) => {
     calls.push({ method: args.method, params: args.params })
@@ -53,7 +61,8 @@ function stubPairedHost(liveTerminalHandles: readonly string[] | null): HostCall
           connected: true
         })),
         totalCount: liveTerminalHandles.length,
-        truncated: false
+        truncated: false,
+        hostScope: { hostIds: ['runtime:env'], omittedHostIds }
       }
     }
   })
@@ -77,6 +86,7 @@ describe('empty host inventory settling the session mirror', () => {
   beforeEach(() => {
     resetHostSessionMirrorHydrationForTests()
     clearRuntimeEnvironmentConnectionGenerationsForTests()
+    clearHostLiveTerminalProbesForTests()
   })
 
   afterEach(() => {
@@ -132,6 +142,21 @@ describe('empty host inventory settling the session mirror', () => {
     expect(hasHostSessionMirrorHydrated(environmentId, WORKTREE)).toBe(false)
   })
 
+  it('leaves waiters parked when terminal.list omits an execution host', async () => {
+    const environmentId = 'env-omitted-host'
+    stubPairedHost([], ['ssh:box-1'])
+    let resumeSweeps = 0
+    parkUntilHostSessionMirrorHydrates(environmentId, WORKTREE, () => {
+      resumeSweeps += 1
+    })
+
+    settleEmptyInventory(environmentId)
+    await flushProbe()
+
+    expect(resumeSweeps).toBe(0)
+    expect(hasHostSessionMirrorHydrated(environmentId, WORKTREE)).toBe(false)
+  })
+
   it('still settles the environment when the inventory published snapshots', async () => {
     const environmentId = 'env-published'
     const calls = stubPairedHost(['terminal-1'])
@@ -157,5 +182,44 @@ describe('empty host inventory settling the session mirror', () => {
     expect(hasHostSessionMirrorHydrated(environmentId, WORKTREE)).toBe(true)
     await flushProbe()
     expect(calls).toEqual([])
+  })
+
+  it('does not reuse an in-flight probe across connection generations', async () => {
+    const responses: ((response: RuntimeRpcResponse<unknown>) => void)[] = []
+    const call = vi.fn(
+      (): Promise<RuntimeRpcResponse<unknown>> =>
+        new Promise((resolve) => {
+          responses.push(resolve)
+        })
+    )
+    const firstProbe = probeHostLiveTerminals('env-generation', call, 1)
+    const secondProbe = probeHostLiveTerminals('env-generation', call, 2)
+
+    expect(call).toHaveBeenCalledTimes(2)
+    responses[0]!({
+      id: 'probe-1',
+      ok: true,
+      result: {
+        terminals: [{}],
+        totalCount: 1,
+        truncated: false,
+        hostScope: { hostIds: ['runtime:env'], omittedHostIds: [] }
+      },
+      _meta: { runtimeId: 'runtime' }
+    })
+    responses[1]!({
+      id: 'probe-2',
+      ok: true,
+      result: {
+        terminals: [],
+        totalCount: 0,
+        truncated: false,
+        hostScope: { hostIds: ['runtime:env'], omittedHostIds: [] }
+      },
+      _meta: { runtimeId: 'runtime' }
+    })
+
+    await expect(firstProbe).resolves.toBe('live')
+    await expect(secondProbe).resolves.toBe('none')
   })
 })

@@ -3720,7 +3720,7 @@ export type HostSessionMirrorPatchVerdict = {
  */
 function settleEmptyHostInventoryOnlyIfHostHasNoTerminals(environmentId: string): void {
   const probedGeneration = getRuntimeEnvironmentConnectionGeneration(environmentId)
-  void probeHostLiveTerminals(environmentId).then((verdict) => {
+  void probeHostLiveTerminals(environmentId, undefined, probedGeneration).then((verdict) => {
     // Why: the probe is a round trip, and a reconnect in between would make its
     // answer speak for a connection whose PTYs nobody listed.
     if (

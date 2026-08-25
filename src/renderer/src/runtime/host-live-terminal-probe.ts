@@ -1,4 +1,7 @@
-import type { RuntimeTerminalListResult } from '../../../shared/runtime-types'
+import type {
+  RuntimeTerminalListHostScope,
+  RuntimeTerminalListResult
+} from '../../../shared/runtime-types'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 
 /**
@@ -21,13 +24,23 @@ type RuntimeCall = (args: {
   timeoutMs: number
 }) => Promise<RuntimeRpcResponse<unknown>>
 
+type CompleteTerminalListResult = RuntimeTerminalListResult & {
+  totalCount: number
+  hostScope: RuntimeTerminalListHostScope
+}
+
 const inFlightProbeByEnvironment = new Map<string, Promise<HostLiveTerminalProbeVerdict>>()
 
-function isTerminalListResult(value: unknown): value is RuntimeTerminalListResult {
+function isTerminalListResult(value: unknown): value is CompleteTerminalListResult {
   return (
     Boolean(value) &&
     typeof value === 'object' &&
-    Array.isArray((value as { terminals?: unknown }).terminals)
+    Array.isArray((value as { terminals?: unknown }).terminals) &&
+    Number.isInteger((value as { totalCount?: unknown }).totalCount) &&
+    (value as { totalCount: number }).totalCount >= 0 &&
+    Boolean((value as { hostScope?: unknown }).hostScope) &&
+    Array.isArray((value as { hostScope?: { hostIds?: unknown } }).hostScope?.hostIds) &&
+    Array.isArray((value as { hostScope?: { omittedHostIds?: unknown } }).hostScope?.omittedHostIds)
   )
 }
 
@@ -52,6 +65,11 @@ async function probeHost(
   if (response.ok === false || !isTerminalListResult(response.result)) {
     return 'unverifiable'
   }
+  // An omitted execution host is an incomplete census. In particular, a relay
+  // can list its local PTYs while an SSH child host is still starting up.
+  if (response.result.hostScope.omittedHostIds.length > 0) {
+    return 'unverifiable'
+  }
   const { terminals, totalCount } = response.result
   return terminals.length > 0 || (typeof totalCount === 'number' && totalCount > 0)
     ? 'live'
@@ -60,20 +78,22 @@ async function probeHost(
 
 export function probeHostLiveTerminals(
   environmentId: string,
-  call: RuntimeCall = (args) => window.api.runtimeEnvironments.call(args)
+  call: RuntimeCall = (args) => window.api.runtimeEnvironments.call(args),
+  connectionGeneration = 0
 ): Promise<HostLiveTerminalProbeVerdict> {
-  const existing = inFlightProbeByEnvironment.get(environmentId)
+  const key = `${environmentId}\0${connectionGeneration}`
+  const existing = inFlightProbeByEnvironment.get(key)
   if (existing) {
     return existing
   }
   const probe = probeHost(environmentId, call)
     .catch((): HostLiveTerminalProbeVerdict => 'unverifiable')
     .finally(() => {
-      if (inFlightProbeByEnvironment.get(environmentId) === probe) {
-        inFlightProbeByEnvironment.delete(environmentId)
+      if (inFlightProbeByEnvironment.get(key) === probe) {
+        inFlightProbeByEnvironment.delete(key)
       }
     })
-  inFlightProbeByEnvironment.set(environmentId, probe)
+  inFlightProbeByEnvironment.set(key, probe)
   return probe
 }
 
