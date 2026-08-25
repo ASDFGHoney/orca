@@ -1,7 +1,11 @@
 import { normalizeAgentStatusPayload } from './agent-status-types'
 import type { AgentHookSource } from './agent-hook-relay'
 import { extractAgentProviderSession } from './agent-session-resume'
-import { canAcceptClaudeCompactTransition } from './agent-hook-listener/claude-compact-ownership'
+import {
+  canAcceptClaudeCompactCompletion,
+  isClaudeCompactCompletionConsumed,
+  markClaudeCompactCompletionConsumed
+} from './claude-compact-completion'
 import { parseHookEnvelope } from './agent-hook-listener/hook-envelope'
 import { readFirstString } from './agent-hook-listener/interactive-tool'
 import type { AgentHookEventPayload } from './agent-hook-listener/listener-event'
@@ -18,7 +22,7 @@ export function normalizeHookPayload(
   source: AgentHookSource,
   body: unknown,
   expectedEnv: string,
-  options: { allowUnanchoredPreCompact?: boolean; allowUnanchoredPostCompact?: boolean } = {}
+  options: { deferCompactOwnershipToClient?: boolean } = {}
 ): AgentHookEventPayload | null {
   const envelope = parseHookEnvelope(state, source, body, expectedEnv)
   if (!envelope) {
@@ -45,38 +49,54 @@ export function normalizeHookPayload(
     (hookPayloadRecord.trigger === 'manual' || hookPayloadRecord.trigger === 'auto')
       ? hookPayloadRecord.trigger
       : undefined
-  const isCompactEvent = eventName === 'PreCompact' || eventName === 'PostCompact'
-  if (isCompactEvent && compactTrigger === undefined) {
+  // Why: fail closed for Claude only. A malformed compact payload must not reach the mapping, but
+  // the old guard was source-BLIND and pre-empted every other provider's normalizer before it ran.
+  if (
+    source === 'claude' &&
+    (eventName === 'PreCompact' || eventName === 'PostCompact') &&
+    compactTrigger === undefined
+  ) {
     return null
   }
   const previousStatus = state.lastStatusByPaneKey.get(paneKey)
-  if (
-    compactTrigger !== undefined &&
-    !canAcceptClaudeCompactTransition(
-      previousStatus,
-      {
-        source,
-        connectionId: null,
-        hookEventName: typeof eventName === 'string' ? eventName : undefined,
-        providerPromptId,
-        compactTrigger,
-        providerSession: providerSession ?? undefined
-      },
-      {
-        allowUnanchoredPreCompact: options.allowUnanchoredPreCompact,
-        allowUnanchoredPostCompact: options.allowUnanchoredPostCompact
+  // Why: only a MANUAL completion claims anything, so only it may write compact-scoped state. An
+  // auto compact runs inside a turn that resumes and emits its own Stop; running the ownership
+  // guard for it would burn the pane's consumed-compact slot on an event that maps to nothing.
+  const isCompactCompletion =
+    source === 'claude' && eventName === 'PostCompact' && compactTrigger === 'manual'
+  if (isCompactCompletion) {
+    // Why: a relay is a forwarder, not the authority on pane identity — pane retirement, tab
+    // closure and hydrated rows all live on the client, and the client re-runs this exact guard on
+    // ingest. Enforcing it on the relay too only adds a way to LOSE the event: the relay's cache is
+    // per-process and capped, so a relay restart or an eviction silently drops the one signal that
+    // can clear a remote pane. Ownership is deferred there, never skipped.
+    if (options.deferCompactOwnershipToClient !== true) {
+      if (
+        isClaudeCompactCompletionConsumed(
+          state.claudeConsumedCompactPromptIdByPaneKey,
+          paneKey,
+          providerPromptId
+        ) ||
+        !canAcceptClaudeCompactCompletion(previousStatus, {
+          source,
+          connectionId: null,
+          providerPromptId,
+          providerSession: providerSession ?? undefined
+        })
+      ) {
+        return null
       }
-    )
-  ) {
-    return null
-  }
-  if (
-    eventName === 'PostCompact' &&
-    compactTrigger !== undefined &&
-    previousStatus?.payload.prompt &&
-    !state.lastPromptByPaneKey.has(paneKey)
-  ) {
-    state.lastPromptByPaneKey.set(paneKey, previousStatus.payload.prompt)
+      markClaudeCompactCompletionConsumed(
+        state.claudeConsumedCompactPromptIdByPaneKey,
+        paneKey,
+        providerPromptId
+      )
+    }
+    // Why: the compact's own event carries no prompt; keep the pane's label from the turn it
+    // summarized rather than blanking the row as it clears.
+    if (previousStatus?.payload.prompt && !state.lastPromptByPaneKey.has(paneKey)) {
+      state.lastPromptByPaneKey.set(paneKey, previousStatus.payload.prompt)
+    }
   }
 
   const extractedPrompt = extractPromptText(hookPayloadRecord)

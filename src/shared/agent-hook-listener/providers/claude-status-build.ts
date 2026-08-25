@@ -1,6 +1,7 @@
 import {
   normalizeAgentStatusPayload,
   type AgentStatusState,
+  type AgentWorkingMode,
   type ParsedAgentStatusPayload
 } from '../../agent-status-types'
 import { claudeRosterToSnapshots } from '../../claude-subagent-roster'
@@ -16,6 +17,7 @@ export function buildClaudeStatusPayload(
   hookPayload: Record<string, unknown>,
   options: {
     stateName: AgentStatusState
+    workingMode?: AgentWorkingMode
     updateToolSnapshot: boolean
     interrupted?: boolean
     sessionBoundary?: boolean
@@ -33,6 +35,7 @@ export function buildClaudeStatusPayload(
   // The normalizer clamps `interrupted` to done payloads, so a gated 'working' emit drops it; claudeLeadStateByPaneKey preserves it for the eventual done.
   return normalizeAgentStatusPayload({
     state: options.stateName,
+    workingMode: options.workingMode,
     // Why: only lead-origin events may reset the prompt cache; a child-driven refresh must not blank the lead's prompt label.
     prompt: resolvePrompt(state, paneKey, promptText, {
       resetOnNewTurn: options.updateToolSnapshot && isNewTurnEvent('claude', eventName)

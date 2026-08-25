@@ -1,4 +1,8 @@
-import type { AgentStatusState, AgentSubagentSnapshot } from '../../agent-status-types'
+import type {
+  AgentStatusState,
+  AgentSubagentSnapshot,
+  AgentWorkingMode
+} from '../../agent-status-types'
 import {
   claudeRosterHasWorkingSubagent,
   reapUnconfirmedRestoredClaudeSubagents,
@@ -6,6 +10,85 @@ import {
 } from '../../claude-subagent-roster'
 import type { AgentHookEventPayload } from '../listener-event'
 import type { ClaudeLeadTurnState, HookListenerState } from '../listener-state'
+import { readString } from '../tool-input-preview'
+
+/** Lead events that may re-anchor a pane's owning session. Allow-list, not a deny-list: a payload we
+ *  can't attribute (unknown name, child event missing its agent_id) must void nothing. */
+const CLAUDE_SESSION_OWNER_EVENTS: ReadonlySet<string> = new Set([
+  'SessionStart',
+  'UserPromptSubmit',
+  'Stop',
+  'StopFailure',
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'PermissionRequest'
+])
+
+/** A pane whose `session_id` changed is running a different conversation, so claims the previous one
+ *  owned are void — the hook-independent backstop for /clear, relaunch and resume, which emit no
+ *  terminating hook (SessionEnd covers about a third of exit paths).
+ *
+ *  Voids only what the replaced session provably owned. Deliberately NOT voided:
+ *  - `claudeRunningNonAgentTaskPaneKeys`: a background shell is an OS process that survives /clear,
+ *    and the previous inventory is positive evidence it was running. Only a fresh inventory or a
+ *    certified process death may retire it.
+ *  - `confirmedTeammate` roster rows: persistent in-process teammates a lead replacement can't end.
+ *  - `claudeLeadStateByPaneKey`: the caller's own fold overwrites it anyway. */
+export function voidClaimsOfReplacedClaudeSession(
+  state: HookListenerState,
+  eventName: unknown,
+  eventAgentId: string | undefined,
+  paneKey: string,
+  hookPayload: Record<string, unknown>
+): void {
+  if (
+    eventAgentId !== undefined ||
+    typeof eventName !== 'string' ||
+    !CLAUDE_SESSION_OWNER_EVENTS.has(eventName)
+  ) {
+    return
+  }
+  // Compact/unknown SessionStart events are intentionally ignored by the status fold; do not let
+  // them advance the owner anchor or the next real lead event will miss the replacement.
+  if (
+    eventName === 'SessionStart' &&
+    hookPayload['source'] !== 'startup' &&
+    hookPayload['source'] !== 'resume' &&
+    hookPayload['source'] !== 'clear'
+  ) {
+    return
+  }
+  const sessionId = readString(hookPayload, 'session_id')
+  if (!sessionId) {
+    return
+  }
+  const previousOwner = state.claudeSessionOwnerByPaneKey.get(paneKey)
+  state.claudeSessionOwnerByPaneKey.set(paneKey, sessionId)
+  if (previousOwner === undefined || previousOwner === sessionId) {
+    return
+  }
+  // Why: a compact restart mints a SessionStart mid-turn under the same conversation; the existing
+  // handler already fails closed on non-idle sources, and this must not undercut it. No other
+  // allow-listed event carries a compact `trigger`, so SessionStart is the whole guard — if a
+  // compact event is ever added to CLAUDE_SESSION_OWNER_EVENTS, re-derive one for it deliberately.
+  if (eventName === 'SessionStart') {
+    return
+  }
+  state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+  const roster = state.claudeSubagentRosterByPaneKey.get(paneKey)
+  if (!roster) {
+    return
+  }
+  for (const [id, tracked] of roster) {
+    if (tracked.confirmedTeammate !== true) {
+      roster.delete(id)
+    }
+  }
+  if (roster.size === 0) {
+    state.claudeSubagentRosterByPaneKey.delete(paneKey)
+  }
+}
 
 export function getOrCreateClaudeSubagentRoster(
   state: HookListenerState,
@@ -23,6 +106,9 @@ export function updateClaudeRunningNonAgentTask(
   state: HookListenerState,
   paneKey: string,
   hasRunningNonAgentTask: boolean,
+  /** Lead-turn property. Pass `false` from any non-lead fold: an interrupt clears the gate even when
+   *  the inventory positively reports a running shell, which is a live-shell judgement no new call
+   *  site may inherit by copying this signature. */
   interrupted: boolean
 ): void {
   if (hasRunningNonAgentTask && !interrupted) {
@@ -32,21 +118,31 @@ export function updateClaudeRunningNonAgentTask(
   }
 }
 
-export function resolveClaudePaneState(
+export type ClaudePaneStatusResolution = {
+  stateName: AgentStatusState
+  workingMode?: AgentWorkingMode
+}
+
+export function resolveClaudePaneStatus(
   state: HookListenerState,
   paneKey: string,
   lead: Pick<ClaudeLeadTurnState, 'state' | 'interrupted'>
-): AgentStatusState {
+): ClaudePaneStatusResolution {
   if (lead.state !== 'done') {
-    return lead.state
+    return { stateName: lead.state }
   }
   const roster = state.claudeSubagentRosterByPaneKey.get(paneKey)
-  return claudeRosterHasWorkingSubagent(roster) ||
-    (!lead.interrupted &&
-      (state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
-        state.claudeActiveSessionCronPaneKeys.has(paneKey)))
-    ? 'working'
-    : 'done'
+  if (claudeRosterHasWorkingSubagent(roster)) {
+    return { stateName: 'working' }
+  }
+  if (
+    !lead.interrupted &&
+    (state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+      state.claudeActiveSessionCronPaneKeys.has(paneKey))
+  ) {
+    return { stateName: 'working', workingMode: 'monitoring' }
+  }
+  return { stateName: 'done' }
 }
 /** Sync the Claude lead-turn record when the SERVER infers an interrupt outside the hook stream (Ctrl+C with a missed Stop); else a later child lifecycle event resurrects the cancelled pane. */
 export function markClaudeLeadTurnInterrupted(state: HookListenerState, paneKey: string): void {
@@ -151,7 +247,9 @@ export function clearClaudePendingWaitForAgent(
 export function clearClaudeAnsweredQuestionWait(
   state: HookListenerState,
   paneKey: string
-): Pick<ClaudeLeadTurnState, 'state' | 'interrupted' | 'turnCompletedAt'> {
+): Pick<ClaudeLeadTurnState, 'state' | 'interrupted' | 'turnCompletedAt'> & {
+  workingMode?: AgentWorkingMode
+} {
   const lead = state.claudeLeadStateByPaneKey.get(paneKey)
   const restored =
     lead?.state === 'waiting'
@@ -165,11 +263,12 @@ export function clearClaudeAnsweredQuestionWait(
       ? { lastAssistantMessage: previousTool.lastAssistantMessage }
       : {}
   )
-  const effectiveState = resolveClaudePaneState(state, paneKey, restored)
-  return effectiveState === restored.state
+  const resolved = resolveClaudePaneStatus(state, paneKey, restored)
+  return resolved.stateName === restored.state && resolved.workingMode === undefined
     ? restored
     : {
-        state: effectiveState,
+        state: resolved.stateName,
+        ...(resolved.workingMode ? { workingMode: resolved.workingMode } : {}),
         ...(restored.interrupted ? { interrupted: true as const } : {}),
         ...(restored.turnCompletedAt !== undefined
           ? { turnCompletedAt: restored.turnCompletedAt }

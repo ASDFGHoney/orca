@@ -12,7 +12,7 @@ import { readString } from '../tool-input-preview'
 import {
   clearClaudePendingWaitForAgent,
   getOrCreateClaudeSubagentRoster,
-  resolveClaudePaneState
+  resolveClaudePaneStatus
 } from './claude-roster-state'
 import { buildClaudeStatusPayload } from './claude-status-build'
 
@@ -132,7 +132,7 @@ export function buildClaudeCachedLeadStatusPayload(
     }
   }
   return buildClaudeStatusPayload(state, eventName, '', paneKey, hookPayload, {
-    stateName: resolveClaudePaneState(state, paneKey, {
+    ...resolveClaudePaneStatus(state, paneKey, {
       state: leadState,
       interrupted: lead?.interrupted
     }),

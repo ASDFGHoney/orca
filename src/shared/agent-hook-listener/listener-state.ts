@@ -23,6 +23,12 @@ export type HookListenerState = {
   claudeRunningNonAgentTaskPaneKeys: Set<string>
   /** Panes whose latest authoritative Claude cron inventory still has a scheduled job. */
   claudeActiveSessionCronPaneKeys: Set<string>
+  /** Compact whose completion each pane already applied, so relay duplicates can't refresh the row. */
+  claudeConsumedCompactPromptIdByPaneKey: Map<string, string>
+  /** Claude `session_id` that last reported on the pane from a LEAD event. A different id means the
+   *  conversation was replaced (/clear, relaunch, resume), so claims the old session owned are void
+   *  even when no SessionStart arrives — the backstop for the exits that emit no terminating hook. */
+  claudeSessionOwnerByPaneKey: Map<string, string>
   /** Live thread-spawn children per Codex pane. */
   codexSubagentRosterByPaneKey: Map<string, CodexSubagentRoster>
   /** Incremental parent/child rollout cursors for Codex collaboration v2. */
@@ -63,6 +69,8 @@ export function createHookListenerState(): HookListenerState {
     claudeUnconfirmedRestoredStatusPaneKeys: new Set(),
     claudeRunningNonAgentTaskPaneKeys: new Set(),
     claudeActiveSessionCronPaneKeys: new Set(),
+    claudeConsumedCompactPromptIdByPaneKey: new Map(),
+    claudeSessionOwnerByPaneKey: new Map(),
     codexSubagentRosterByPaneKey: new Map(),
     codexSubagentTranscriptByPaneKey: new Map(),
     codexLeadStateByPaneKey: new Map()
@@ -75,14 +83,36 @@ export function clearPaneCacheState(state: HookListenerState, paneKey: string): 
   deletePaneScopedCacheEntry(state.lastStatusByPaneKey, paneKey)
   deletePaneScopedCacheEntry(state.antigravityCompletedTranscriptByPaneKey, paneKey)
   deletePaneScopedSetEntry(state.ampCompletedCacheKeys, paneKey)
+  deletePaneScopedCacheEntry(state.claudeConsumedCompactPromptIdByPaneKey, paneKey)
   state.claudeSubagentRosterByPaneKey.delete(paneKey)
   state.claudeLeadStateByPaneKey.delete(paneKey)
   state.claudeUnconfirmedRestoredStatusPaneKeys.delete(paneKey)
   state.claudeRunningNonAgentTaskPaneKeys.delete(paneKey)
   state.claudeActiveSessionCronPaneKeys.delete(paneKey)
+  state.claudeSessionOwnerByPaneKey.delete(paneKey)
   state.codexSubagentRosterByPaneKey.delete(paneKey)
   state.codexSubagentTranscriptByPaneKey.delete(paneKey)
   state.codexLeadStateByPaneKey.delete(paneKey)
+}
+
+/** Does this pane still hold anything that can ASSERT a state — a stored row, or a Claude latch that
+ *  `resolveClaudePaneStatus` would re-gate `working` from on the pane's next event?
+ *
+ *  Deliberately lives next to `clearPaneCacheState` above and enumerates the claim-bearing subset of
+ *  what that function deletes: the two must be edited together, and keeping them three lines apart in
+ *  one file is what makes that obvious. Prompt/tool/transcript caches are excluded — they render a
+ *  row, they never create one. */
+export function paneHasStateClaims(state: HookListenerState, paneKey: string): boolean {
+  return (
+    state.lastStatusByPaneKey.has(paneKey) ||
+    state.claudeSubagentRosterByPaneKey.has(paneKey) ||
+    state.claudeLeadStateByPaneKey.has(paneKey) ||
+    state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) ||
+    state.claudeActiveSessionCronPaneKeys.has(paneKey) ||
+    state.claudeSessionOwnerByPaneKey.has(paneKey) ||
+    state.codexSubagentRosterByPaneKey.has(paneKey) ||
+    state.codexLeadStateByPaneKey.has(paneKey)
+  )
 }
 
 export function movePaneScopedMapEntries<T>(
@@ -126,11 +156,13 @@ export function movePaneCacheState(
   movePaneScopedMapEntries(state.lastStatusByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.antigravityCompletedTranscriptByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.ampCompletedCacheKeys, fromPaneKey, toPaneKey)
+  movePaneScopedMapEntries(state.claudeConsumedCompactPromptIdByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.claudeSubagentRosterByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.claudeLeadStateByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeUnconfirmedRestoredStatusPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeRunningNonAgentTaskPaneKeys, fromPaneKey, toPaneKey)
   movePaneScopedSetEntries(state.claudeActiveSessionCronPaneKeys, fromPaneKey, toPaneKey)
+  movePaneScopedMapEntries(state.claudeSessionOwnerByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexSubagentRosterByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexSubagentTranscriptByPaneKey, fromPaneKey, toPaneKey)
   movePaneScopedMapEntries(state.codexLeadStateByPaneKey, fromPaneKey, toPaneKey)
@@ -169,6 +201,7 @@ export function clearAllListenerCaches(state: HookListenerState): void {
   state.lastStatusByPaneKey.clear()
   state.antigravityCompletedTranscriptByPaneKey.clear()
   state.ampCompletedCacheKeys.clear()
+  state.claudeConsumedCompactPromptIdByPaneKey.clear()
   state.warnedVersions.clear()
   state.warnedEnvs.clear()
   state.claudeSubagentRosterByPaneKey.clear()
@@ -176,6 +209,7 @@ export function clearAllListenerCaches(state: HookListenerState): void {
   state.claudeUnconfirmedRestoredStatusPaneKeys.clear()
   state.claudeRunningNonAgentTaskPaneKeys.clear()
   state.claudeActiveSessionCronPaneKeys.clear()
+  state.claudeSessionOwnerByPaneKey.clear()
   state.codexSubagentRosterByPaneKey.clear()
   state.codexSubagentTranscriptByPaneKey.clear()
   state.codexLeadStateByPaneKey.clear()

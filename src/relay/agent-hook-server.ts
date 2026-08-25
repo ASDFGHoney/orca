@@ -16,7 +16,6 @@ import {
 import { HOOK_REQUEST_SLOWLORIS_MS } from '../shared/agent-hook-listener/listener-limits'
 import { normalizeHookPayload } from '../shared/agent-hook-listener'
 import { readRequestBody } from '../shared/agent-hook-listener/request-body'
-import { resolveCachedClaudeCompactOwnership } from '../shared/agent-hook-listener/claude-compact-ownership'
 import { resolveHookSource } from '../shared/agent-hook-listener/source-routing'
 import type { AgentHookEventPayload } from '../shared/agent-hook-listener/listener-event'
 import {
@@ -243,8 +242,7 @@ export class RelayAgentHookServer {
         return
       }
       const event = normalizeHookPayload(this.state, source, body, this.env, {
-        allowUnanchoredPreCompact: true,
-        allowUnanchoredPostCompact: true
+        deferCompactOwnershipToClient: true
       })
       if (event) {
         // TODO: once normalizeHookPayload returns validated env/version, drop bodyEnv/bodyVersion and source them from the listener result.
@@ -280,8 +278,10 @@ export class RelayAgentHookServer {
     if (event.payload.state !== 'done' || event.payload.lastAssistantMessage) {
       this.retryScheduler.clearAssistantMessageRetry(event.paneKey)
     }
-    const previous = this.state.lastStatusByPaneKey.get(event.paneKey)
-    const cachedEvent = resolveCachedClaudeCompactOwnership(previous, event)
+    // Why: keep PostCompact identity in the replay cache so the client can re-run ownership when
+    // it reconnects. Stripping it would let a cold relay replay a completion as an ordinary `done`
+    // row and resurrect a pane that the client had already retired.
+    const cachedEvent = event
     // Why: delete-then-set makes Map insertion order = recency, so the cap below evicts the longest-idle pane.
     this.state.lastStatusByPaneKey.delete(event.paneKey)
     this.state.lastStatusByPaneKey.set(event.paneKey, cachedEvent)

@@ -5,6 +5,7 @@ import {
   claudeRosterHasRestoredSnapshotSubagent,
   claudeRosterHasRuntimeWorkingSubagent,
   foldClaudeBackgroundTasksIntoRoster,
+  reapUnconfirmedRestoredClaudeSubagents,
   upsertWorkingClaudeSubagent
 } from '../../claude-subagent-roster'
 import type { HookListenerState } from '../listener-state'
@@ -17,8 +18,9 @@ import {
 } from './claude-lifecycle-events'
 import {
   getOrCreateClaudeSubagentRoster,
-  resolveClaudePaneState,
-  updateClaudeRunningNonAgentTask
+  resolveClaudePaneStatus,
+  updateClaudeRunningNonAgentTask,
+  voidClaimsOfReplacedClaudeSession
 } from './claude-roster-state'
 import { buildClaudeStatusPayload } from './claude-status-build'
 
@@ -37,6 +39,7 @@ export function normalizeClaudeEvent(
   ) {
     return normalizeClaudeSubagentLifecycleEvent(state, eventName, paneKey, hookPayload)
   }
+  voidClaimsOfReplacedClaudeSession(state, eventName, eventAgentId, paneKey, hookPayload)
   if (eventName === 'SessionStart') {
     // Why: SessionStart is the only signal a resumed session emits before its first prompt
     // (STA-3386). Land it as a session-boundary 'done' row: 'working' would show a phantom
@@ -91,19 +94,21 @@ export function normalizeClaudeEvent(
     (eventName === 'PreToolUse' || eventName === 'PermissionRequest') &&
     isAskUserQuestionTool(eventToolName)
   const isAskUserQuestion = eventName === 'PreToolUse' && isAskUserQuestionWait
-  // Why: /compact can take minutes and does not emit Stop. PreCompact marks the pane busy;
-  // PostCompact clears it so a finished compact cannot leave a sticky working spinner (#11352).
+  // Why: a manual /compact swallows the turn boundary — it ends at an idle prompt and emits no
+  // Stop, so PostCompact is the pane's only clearing signal (STA-2915). An auto compact runs INSIDE
+  // a turn that resumes and emits its own Stop, so it must claim nothing. PreCompact fires before
+  // the compact is validated (an aborted compact emits it alone), so it is neither registered nor
+  // mapped — see claude-compact-completion.ts.
+  const isManualCompactCompletion = eventName === 'PostCompact' && hookPayload.trigger === 'manual'
   const reportedStateName =
     eventName === 'UserPromptSubmit' ||
     eventName === 'PostToolUse' ||
     eventName === 'PostToolUseFailure' ||
-    eventName === 'PreCompact' ||
-    (eventName === 'PostCompact' && hookPayload.trigger === 'auto') ||
     (eventName === 'PreToolUse' && !isAskUserQuestion)
       ? 'working'
       : eventName === 'PermissionRequest' || isAskUserQuestion
         ? 'waiting'
-        : isTurnBoundary || (eventName === 'PostCompact' && hookPayload.trigger === 'manual')
+        : isTurnBoundary || isManualCompactCompletion
           ? 'done'
           : null
 
@@ -183,7 +188,7 @@ export function normalizeClaudeEvent(
     const restored = lead.stateBeforeWait ?? { state: 'working' as const }
     state.claudeLeadStateByPaneKey.set(paneKey, restored)
     return buildClaudeStatusPayload(state, eventName, promptText, paneKey, hookPayload, {
-      stateName: resolveClaudePaneState(state, paneKey, restored),
+      ...resolveClaudePaneStatus(state, paneKey, restored),
       updateToolSnapshot: true,
       interrupted: restored.interrupted,
       turnCompletedAt: restored.turnCompletedAt
@@ -232,16 +237,35 @@ export function normalizeClaudeEvent(
     state.claudeActiveSessionCronPaneKeys.delete(paneKey)
   }
 
-  const effectiveState = resolveClaudePaneState(state, paneKey, {
+  if (isManualCompactCompletion) {
+    // Why: a manual /compact only ever completes at an idle prompt, so a child that exists ONLY as
+    // a disk snapshot has nothing live behind it and must not keep the pane spinning — that
+    // restored child is what holds the stuck row STA-2915 actually reports. Everything else the
+    // done-gate consults is live evidence (a child observed in this runtime, an unclassifiable
+    // running background task, a registered session cron) and still holds the pane.
+    const restoredRoster = state.claudeSubagentRosterByPaneKey.get(paneKey)
+    if (
+      restoredRoster &&
+      reapUnconfirmedRestoredClaudeSubagents(restoredRoster) &&
+      restoredRoster.size === 0
+    ) {
+      state.claudeSubagentRosterByPaneKey.delete(paneKey)
+    }
+  }
+
+  const resolvedStatus = resolveClaudePaneStatus(state, paneKey, {
     state: reportedStateName,
     interrupted
   })
+  // Why: #15202's compact-completion guard reads the resolved state; this branch replaced the
+  // resolver with one that also reports workingMode, so bridge rather than resolve twice.
+  const effectiveState = resolvedStatus.stateName
   // Why: the lead already ended — the pane stays `working` only because background inventory is still registered. `stateStartedAt` is pinned for that whole run, so this end time is the per-turn identity and the later all-clear's pair key.
   const turnCompletedAt =
     eventAgentId === undefined &&
     isTurnBoundary &&
     reportedStateName === 'done' &&
-    effectiveState === 'working' &&
+    resolvedStatus.stateName === 'working' &&
     interrupted !== true
       ? Date.now()
       : undefined
@@ -259,7 +283,7 @@ export function normalizeClaudeEvent(
   if (
     isTurnBoundary &&
     eventAgentId === undefined &&
-    effectiveState === 'working' &&
+    resolvedStatus.stateName === 'working' &&
     claudeRosterHasRestoredSnapshotSubagent(effectiveRoster) &&
     !claudeRosterHasRuntimeWorkingSubagent(effectiveRoster) &&
     !state.claudeRunningNonAgentTaskPaneKeys.has(paneKey) &&
@@ -269,10 +293,23 @@ export function normalizeClaudeEvent(
     state.claudeUnconfirmedRestoredStatusPaneKeys.add(paneKey)
   }
 
+  if (isManualCompactCompletion && effectiveState !== 'done') {
+    // Why: a compact completion CLEARS a row or says nothing at all. Live evidence still holds this
+    // pane, so restating it would only strip `restoredUnconfirmed` off a hydrated row and restart
+    // the staleness clock for work the compact never observed — strictly worse than the silence
+    // this event replaced. The lead record above still marks the turn ended, so whichever event
+    // retires that evidence can clear the pane.
+    return null
+  }
+
   return buildClaudeStatusPayload(state, eventName, promptText, paneKey, hookPayload, {
-    stateName: effectiveState,
+    ...resolvedStatus,
     updateToolSnapshot: true,
     interrupted,
+    // Why: a finished compact is a session-shaped boundary, not a completed turn. Without this the
+    // clearing `done` would fire completion notifications, unread counts and automation-run
+    // completion evidence for work nobody did.
+    sessionBoundary: isManualCompactCompletion ? true : undefined,
     turnCompletedAt
   })
 }
