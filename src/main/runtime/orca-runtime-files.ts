@@ -827,7 +827,8 @@ export class RuntimeFileCommands {
       relativePath,
       content: truncated.content,
       truncated: truncated.truncated,
-      byteLength: truncated.byteLength
+      byteLength: truncated.byteLength,
+      maxByteLength: MOBILE_FILE_READ_MAX_BYTES
     }
   }
 
@@ -1260,7 +1261,8 @@ export class RuntimeFileCommands {
       relativePath: grant.absolutePath,
       content: truncated.content,
       truncated: truncated.truncated,
-      byteLength: truncated.byteLength
+      byteLength: truncated.byteLength,
+      maxByteLength: MOBILE_FILE_READ_MAX_BYTES
     }
   }
 

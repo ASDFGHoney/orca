@@ -28,6 +28,8 @@ export type RuntimeFileReadResult = {
   content: string
   truncated: boolean
   byteLength: number
+  /** Budget that produced `truncated`. Absent on hosts predating this field. */
+  maxByteLength?: number
 }
 
 export type RuntimeTerminalPathOpenTarget =

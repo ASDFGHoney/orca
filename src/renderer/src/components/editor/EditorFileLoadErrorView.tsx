@@ -1,14 +1,24 @@
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
+import { parseFileTooLargeMessage } from '../../../../shared/editor-file-read-limit'
+import { LargeFileFallback } from './LargeFileFallback'
 
 export function EditorFileLoadErrorView({
   message,
+  filePath,
   onRetry
 }: {
   message: string
+  filePath?: string
   onRetry: () => void
 }): React.JSX.Element {
+  // Why: a size refusal is deterministic, so the generic retry box is a dead end.
+  const tooLarge = parseFileTooLargeMessage(message)
+  if (tooLarge) {
+    return <LargeFileFallback filePath={filePath ?? ''} detail={tooLarge} />
+  }
+
   return (
     <div className="flex h-full items-center justify-center bg-editor-surface p-6 text-sm text-muted-foreground">
       <div className="flex max-w-xl items-start gap-3 rounded-md border border-border bg-background p-4">

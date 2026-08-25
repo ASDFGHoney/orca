@@ -22,6 +22,7 @@ import {
   unwrapRuntimeRpcResult
 } from './runtime-rpc-client'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
+import { formatFileTooLargeMessage } from '../../../shared/editor-file-read-limit'
 import { basename, joinPath, normalizeRelativePath } from '@/lib/path'
 import {
   isWindowsAbsolutePathLike,
@@ -295,7 +296,16 @@ export async function readRuntimeFileContent({
   if (result.truncated) {
     // Why: the runtime file RPC is preview-sized today; treating a truncated
     // payload as editable content would make saves overwrite the rest of the file.
-    throw new Error(`Remote file is too large to open in the editor (${result.byteLength} bytes)`)
+    // Older hosts do not report the budget, so only name a limit we were told.
+    throw new Error(
+      typeof result.maxByteLength === 'number'
+        ? formatFileTooLargeMessage({
+            byteLength: result.byteLength,
+            limitBytes: result.maxByteLength,
+            scope: 'runtime'
+          })
+        : `Remote file is too large to open in the editor (${result.byteLength} bytes)`
+    )
   }
   return { content: result.content, isBinary: false }
 }

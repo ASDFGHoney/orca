@@ -430,7 +430,29 @@ describe('registerFilesystemHandlers', () => {
 
     await expect(
       handlers.get('fs:readFile')!(null, { filePath: path.resolve('/workspace/repo/huge.json') })
-    ).rejects.toThrow('exceeds 50MB limit')
+    ).rejects.toThrow('[size=53477376 limit=52428800 scope=local]')
+
+    expect(readFileMock).not.toHaveBeenCalled()
+  })
+
+  // The size gate must not swallow the binary placeholder: an oversized archive
+  // is not "unreadable", it is simply not text, and the editor already has a
+  // view for that.
+  it('still reports oversized non-previewable binaries as binary', async () => {
+    statMock.mockResolvedValue({ size: 60 * 1024 * 1024, isDirectory: () => false, mtimeMs: 123 })
+    openMock.mockResolvedValue({
+      read: vi.fn(async (buffer: Buffer) => {
+        buffer[0] = 0x00
+        return { bytesRead: 1, buffer }
+      }),
+      close: vi.fn()
+    })
+
+    registerFilesystemHandlers(store as never)
+
+    await expect(
+      handlers.get('fs:readFile')!(null, { filePath: path.resolve('/workspace/repo/huge.bin') })
+    ).resolves.toEqual({ content: '', isBinary: true })
 
     expect(readFileMock).not.toHaveBeenCalled()
   })

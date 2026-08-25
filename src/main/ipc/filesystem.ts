@@ -144,15 +144,20 @@ import {
   applyGitStatusUpstreamRefWatchRequest,
   type GitStatusUpstreamRefWatchRequest
 } from './git-status-upstream-ref-watch-request'
+import {
+  EDITOR_PREVIEWABLE_BINARY_MAX_BYTES,
+  EDITOR_TEXT_READ_LIMIT_BYTES,
+  formatFileTooLargeMessage
+} from '../../shared/editor-file-read-limit'
 
-// Why: Monaco degrades features on large files like VS Code, so a 5MB block would needlessly lock out ordinary JSON/log files.
-const MAX_TEXT_FILE_SIZE = 50 * 1024 * 1024 // 50MB
+// Why: the editor degrades features on large files, so a 5MB block would needlessly lock out ordinary JSON/log files.
+const MAX_TEXT_FILE_SIZE = EDITOR_TEXT_READ_LIMIT_BYTES.local
 const BINARY_PROBE_BYTES = 8192
 const FULL_GIT_OBJECT_ID_PATTERN = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/
 // 32 visible matches plus one truncation sentinel stays below the legacy frame ceiling.
 const QUICK_OPEN_SSH_LEGACY_RESULT_LIMIT = 33
 // Why: previewable binaries are base64 blobs (not parsed as text), and local IPC has no frame limit (unlike the relay's 10MB), so 50MB is safe.
-const MAX_PREVIEWABLE_BINARY_SIZE = 50 * 1024 * 1024 // 50MB
+const MAX_PREVIEWABLE_BINARY_SIZE = EDITOR_PREVIEWABLE_BINARY_MAX_BYTES
 const PREVIEWABLE_BINARY_MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -164,6 +169,11 @@ const PREVIEWABLE_BINARY_MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.pdf': 'application/pdf'
 }
+
+function throwFileTooLarge(byteLength: number, limitBytes: number): never {
+  throw new Error(formatFileTooLargeMessage({ byteLength, limitBytes, scope: 'local' }))
+}
+
 async function readLocalLogSnapshot(filePath: string): Promise<{
   content: string
   isBinary: boolean
@@ -173,15 +183,11 @@ async function readLocalLogSnapshot(filePath: string): Promise<{
   try {
     const stats = await handle.stat()
     if (stats.size > MAX_TEXT_FILE_SIZE) {
-      throw new Error(
-        `File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_FILE_SIZE / 1024 / 1024}MB limit`
-      )
+      throwFileTooLarge(stats.size, MAX_TEXT_FILE_SIZE)
     }
     const buffer = await handle.readFile()
     if (buffer.byteLength > MAX_TEXT_FILE_SIZE) {
-      throw new Error(
-        `File too large: ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_FILE_SIZE / 1024 / 1024}MB limit`
-      )
+      throwFileTooLarge(buffer.byteLength, MAX_TEXT_FILE_SIZE)
     }
     if (isBinaryBuffer(buffer)) {
       return { content: '', isBinary: true }
@@ -599,14 +605,11 @@ export function registerFilesystemHandlers(
       }
       const stats = await stat(filePath)
       const mimeType = PREVIEWABLE_BINARY_MIME_TYPES[extname(filePath).toLowerCase()]
-      const sizeLimit = mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
-      if (stats.size > sizeLimit) {
-        throw new Error(
-          `File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB exceeds ${sizeLimit / 1024 / 1024}MB limit`
-        )
-      }
 
       if (mimeType) {
+        if (stats.size > MAX_PREVIEWABLE_BINARY_SIZE) {
+          throwFileTooLarge(stats.size, MAX_PREVIEWABLE_BINARY_SIZE)
+        }
         const buffer = await readFile(filePath)
         return {
           content: buffer.toString('base64'),
@@ -617,9 +620,15 @@ export function registerFilesystemHandlers(
         }
       }
 
-      // Why: probe large unknown files first so archives aren't fully buffered only to discover they aren't editable text.
+      // Why: classify before the text budget applies. An oversized archive is not
+      // unreadable, it is not text — the binary placeholder is the right answer,
+      // and the probe reads 8KB so it never buffers the file to find out.
       if (stats.size > BINARY_PROBE_BYTES && (await isBinaryFilePrefix(filePath))) {
         return { content: '', isBinary: true }
+      }
+
+      if (stats.size > MAX_TEXT_FILE_SIZE) {
+        throwFileTooLarge(stats.size, MAX_TEXT_FILE_SIZE)
       }
 
       const buffer = await readFile(filePath)

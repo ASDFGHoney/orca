@@ -185,6 +185,7 @@ export function EditorContent({
       return (
         <EditorFileLoadErrorView
           message={fileContent.loadError}
+          filePath={activeFile.filePath}
           onRetry={() => reloadContent(activeFile)}
         />
       )
