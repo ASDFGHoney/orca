@@ -105,7 +105,7 @@ function seedOmpTab(store: ReturnType<typeof createTestStore>): void {
 /** The identity a tab-bar frame reads as: 'OMP', 'Pi', or null when neither. */
 function displayedAgentIdentity(tabTitle: string): string | null {
   return getPiCompatibleSyntheticAgentLabel(
-    resolveTerminalTabTitle({ title: tabTitle }, false, 'Terminal 1')
+    resolveTerminalTabTitle({ title: tabTitle, customTitle: null }, false, 'Terminal 1')
   )
 }
 
@@ -157,6 +157,31 @@ describe('OMP-owned tab title across interleaved OMP/Pi spinner frames', () => {
         store.getState().runtimePaneTitlesByTabId[TAB_ID]?.[PANE_ID] ?? ''
       )
     ).toBe('OMP')
+  })
+
+  // Why: relabeling is for frames naming a DIFFERENT group member. A frame that already names the
+  // owner carries its own status wording, so restating bare "OMP" as "OMP ready" would change a
+  // tab that never flapped — and the same guard keeps a plain Pi-owned tab byte-identical.
+  it.each([
+    ['omp', 'OMP'],
+    ['pi', 'Pi']
+  ] as const)('leaves a %s-owned tab’s own identity frames untouched', (launchAgent, label) => {
+    const store = createTestStore()
+    seedStore(store, {
+      worktreesByRepo: { repo1: [makeWorktree({ id: WT, repoId: 'repo1', path: '/path/wt-omp' })] },
+      tabsByWorktree: {
+        [WT]: [makeTab({ id: TAB_ID, worktreeId: WT, title: 'Terminal 1', launchAgent })]
+      },
+      unifiedTabsByWorktree: {
+        [WT]: [makeUnifiedTab({ id: TAB_ID, worktreeId: WT, groupId: GROUP_ID })]
+      },
+      activeWorktreeId: WT
+    })
+
+    for (const frame of [label, `${label} ready`, `⠋ ${label}`]) {
+      store.getState().setRuntimePaneTitle(TAB_ID, PANE_ID, frame)
+      expect(store.getState().runtimePaneTitlesByTabId[TAB_ID]?.[PANE_ID]).toBe(frame)
+    }
   })
 
   // Why: owner-pinning must stay scoped to bare identity frames. A semantic session title carries

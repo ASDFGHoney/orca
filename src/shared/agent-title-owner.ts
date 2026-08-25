@@ -181,7 +181,14 @@ export function relabelCompatibleAgentIdentityFrameForOwner(
   title: string,
   ownerAgentType: AgentType | null | undefined
 ): string {
-  if (!getPiCompatibleSyntheticAgentLabel(title)) {
+  const frameLabel = getPiCompatibleSyntheticAgentLabel(title)
+  if (!frameLabel) {
+    return title
+  }
+  // Why: the frame already names the owner, so its own status wording is authoritative — rewriting
+  // it would restate bare "Pi" as "Pi ready" and change a Pi-owned tab that never flapped.
+  const ownerProfile = getSyntheticAgentTitleProfile(ownerAgentType)
+  if (ownerProfile?.workingLabel.toLowerCase() === frameLabel.toLowerCase()) {
     return title
   }
   return normalizeCompatibleAgentTitleForOwner(title, ownerAgentType)
