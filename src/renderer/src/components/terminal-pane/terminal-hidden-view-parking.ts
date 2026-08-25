@@ -27,6 +27,7 @@ export type TerminalColdParkPolicyOverrides = {
   hotRetainLimit?: number
   retentionTtlMs?: number
   retentionLimit?: number
+  retentionPaneLimit?: number
 }
 
 export type ColdParkableTerminalTab = Pick<TerminalTab, 'id' | 'ptyId' | 'pendingActivationSpawn'>

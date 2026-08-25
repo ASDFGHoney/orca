@@ -11,6 +11,7 @@ import {
   hasPendingRetentionSpawnWork,
   isEvictionExemptTerminalPty,
   selectForceParkEvictableTabIds,
+  countMountedWorktreePanes,
   selectRetentionForceParkedTerminalWorktrees,
   type TerminalWorktreeRetentionCandidate
 } from './terminal-hidden-worktree-retention'
@@ -323,5 +324,114 @@ describe('selectForceParkEvictableTabIds', () => {
   // the degenerate case a fleet-wide daemon fail-open produces, which the host logs.
   it('yields nothing when every tab is exempt', () => {
     expect(selectForceParkEvictableTabIds(tabs, () => true)).toEqual([])
+  })
+})
+
+describe('retention pane budget', () => {
+  const nowMs = 5_000_000
+  const MINUTE = 60_000
+
+  function paneCandidate(
+    worktreeId: string,
+    hiddenMinutesAgo: number,
+    mountedPaneCount: number
+  ): TerminalWorktreeRetentionCandidate {
+    return {
+      worktreeId,
+      hiddenSinceMs: nowMs - hiddenMinutesAgo * MINUTE,
+      isVisible: false,
+      shouldMeasureHiddenWorktree: false,
+      hasActivityTerminalPortal: false,
+      ordinaryParkingCovers: false,
+      hasPendingSpawnWork: false,
+      mountedPaneCount
+    }
+  }
+
+  const select = (
+    worktrees: TerminalWorktreeRetentionCandidate[],
+    retentionPaneLimit?: number
+  ): Set<string> =>
+    selectRetentionForceParkedTerminalWorktrees({
+      worktrees,
+      parkingEnabled: true,
+      retentionBudgetEnabled: true,
+      nowMs,
+      ...(retentionPaneLimit === undefined ? {} : { retentionPaneLimit })
+    })
+
+  it('leaves the ordinary working set alone', () => {
+    // Four hidden worktrees at one tab each is what the worktree cap was sized
+    // for; the pane budget must not touch it.
+    const worktrees = [1, 2, 3, 4].map((n) => paneCandidate(`wt-${n}`, n, 1))
+    expect(select(worktrees)).toEqual(new Set())
+  })
+
+  it('parks past the pane budget even when the worktree cap is satisfied', () => {
+    // The measured Windows case: 4 retained worktrees x 4 mounted panes = 16
+    // panes, which the count-based cap reports as within budget.
+    const worktrees = [1, 2, 3, 4].map((n) => paneCandidate(`wt-${n}`, n, 4))
+    // wt-1 (most recently hidden) keeps 4; wt-2 takes it to 8, still within;
+    // wt-3 and wt-4 cross it.
+    expect(select(worktrees)).toEqual(new Set(['wt-3', 'wt-4']))
+  })
+
+  it('never parks the worktree the user just left, however many panes it holds', () => {
+    // Why: remounting the view you just switched away from is the cost users
+    // actually notice, and one worktree can legitimately exceed the budget.
+    const worktrees = [paneCandidate('wt-huge', 1, 40), paneCandidate('wt-small', 2, 1)]
+    expect(select(worktrees)).toEqual(new Set(['wt-small']))
+  })
+
+  it('evicts least-recently-hidden first', () => {
+    const worktrees = [
+      paneCandidate('newest', 1, 5),
+      paneCandidate('middle', 5, 5),
+      paneCandidate('oldest', 9, 5)
+    ]
+    expect(select(worktrees)).toEqual(new Set(['middle', 'oldest']))
+  })
+
+  it('counts an unknown pane count as one rather than free', () => {
+    // Why: a worktree whose layout could not be read must never look costless,
+    // or a missing layout silently lifts the budget for everything after it.
+    const worktrees = [
+      paneCandidate('wt-1', 1, 8),
+      { ...paneCandidate('wt-2', 2, 1), mountedPaneCount: undefined }
+    ]
+    expect(select(worktrees)).toEqual(new Set(['wt-2']))
+  })
+
+  it('honours an explicit pane limit', () => {
+    const worktrees = [1, 2, 3].map((n) => paneCandidate(`wt-${n}`, n, 2))
+    expect(select(worktrees, 100)).toEqual(new Set())
+    expect(select(worktrees, 2)).toEqual(new Set(['wt-2', 'wt-3']))
+  })
+
+  it('stays off when the retention budget is disabled', () => {
+    const worktrees = [1, 2, 3, 4].map((n) => paneCandidate(`wt-${n}`, n, 10))
+    expect(
+      selectRetentionForceParkedTerminalWorktrees({
+        worktrees,
+        parkingEnabled: true,
+        retentionBudgetEnabled: false,
+        nowMs
+      })
+    ).toEqual(new Set())
+  })
+})
+
+describe('countMountedWorktreePanes', () => {
+  it('counts split leaves, and one pane for a tab with no layout row yet', () => {
+    expect(
+      countMountedWorktreePanes([{ id: 'split' }, { id: 'plain' }, { id: 'empty-layout' }], {
+        split: { ptyIdsByLeafId: { a: 'pty-a', b: 'pty-b', c: 'pty-c' } },
+        'empty-layout': { ptyIdsByLeafId: {} }
+      })
+    ).toBe(5)
+  })
+
+  it('is zero for a worktree with no tabs', () => {
+    expect(countMountedWorktreePanes([], {})).toBe(0)
   })
 })

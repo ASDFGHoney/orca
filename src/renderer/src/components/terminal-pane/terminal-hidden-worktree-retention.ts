@@ -30,6 +30,25 @@ import { createWorktreeTabBucketProjection } from '@/lib/worktree-tab-bucket-pro
 // eviction, not demotion.
 export const TERMINAL_HIDDEN_WORKTREE_RETENTION_LIMIT = 4
 export const TERMINAL_HIDDEN_WORKTREE_RETENTION_TTL_MS = 15 * 60_000
+/**
+ * Second bound, in the unit the cost is actually paid in.
+ *
+ * Why: the cap above counts WORKTREES, but a hidden worktree costs whatever its
+ * mounted panes hold, and nothing bounds panes-per-worktree. Measured on
+ * Windows against this app: 6 worktrees x 4 terminal tabs filled with 8000
+ * lines each left 24 mounted panes holding 19.3M buffer cells, and a renderer
+ * that idled at 566MB with only one worktree visible — the worktree cap had
+ * evicted 4 panes and then plateaued, exactly as designed and nowhere near
+ * enough. Four worktrees x N tabs x scrollback has no ceiling at all, and the
+ * scrollback setting goes to 50k rows.
+ *
+ * 8 panes is ~62MB of buffers at the 5k-row default (~12MB/pane measured at
+ * 8000 rows, ~7.7MB at 5k). It leaves the ordinary working set — four hidden
+ * worktrees at one or two tabs each — entirely untouched, and only engages for
+ * the many-pane tail. Tune it here; it is one number and it is not load-bearing
+ * for correctness.
+ */
+export const TERMINAL_HIDDEN_WORKTREE_RETENTION_PANE_LIMIT = 8
 
 export function createTerminalWorktreeTopologyProjection(
   onInspectBucket?: (worktreeId: string) => void
@@ -131,6 +150,24 @@ export function countEvictionExemptTabRoutes(
   return counts
 }
 
+/**
+ * Panes a worktree keeps mounted: split leaves where a layout exists, else one
+ * per tab. This is the unit the retention pane budget is spent in.
+ */
+export function countMountedWorktreePanes(
+  tabs: readonly Pick<TerminalTab, 'id'>[],
+  layoutsByTabId: Readonly<Record<string, { ptyIdsByLeafId?: Readonly<Record<string, string>> }>>
+): number {
+  let panes = 0
+  for (const tab of tabs) {
+    const leafIds = layoutsByTabId[tab.id]?.ptyIdsByLeafId
+    const leafCount = leafIds ? Object.keys(leafIds).length : 0
+    // An unsplit tab has no layout row yet; it still holds one mounted pane.
+    panes += leafCount > 0 ? leafCount : 1
+  }
+  return panes
+}
+
 export function formatEvictionExemptRouteCounts(counts: EvictionExemptRouteCounts): string {
   return `routes=fail-open:${counts.failOpen},foreign:${counts.foreignWorktree},capability:${counts.capabilityUnknown},split-pane:${counts.splitPane}`
 }
@@ -149,6 +186,12 @@ export type TerminalWorktreeRetentionCandidate = {
   ordinaryParkingCovers: boolean
   /** Pending startup or activation spawn — a mount is imminent; never evict. */
   hasPendingSpawnWork: boolean
+  /**
+   * Panes this worktree keeps mounted while hidden (split leaves, not tabs).
+   * Omitted means "unknown", which is counted as one pane rather than zero so a
+   * missing layout can never make a worktree look free to retain.
+   */
+  mountedPaneCount?: number
 }
 
 /**
@@ -178,6 +221,7 @@ export function selectRetentionForceParkedTerminalWorktrees(
   }
   const coldParkDelayMs = args.coldParkDelayMs ?? TERMINAL_WORKTREE_COLD_PARK_DELAY_MS
   const candidates: ColdParkRetainCandidate[] = []
+  const paneCountsById = new Map<string, number>()
   for (const worktree of args.worktrees) {
     if (
       worktree.hiddenSinceMs === null ||
@@ -192,6 +236,7 @@ export function selectRetentionForceParkedTerminalWorktrees(
       continue
     }
     candidates.push({ id: worktree.worktreeId, hiddenSinceMs: worktree.hiddenSinceMs })
+    paneCountsById.set(worktree.worktreeId, worktree.mountedPaneCount ?? 1)
   }
   const retentionTtlMs = args.retentionTtlMs ?? TERMINAL_HIDDEN_WORKTREE_RETENTION_TTL_MS
   const forceParkedIds = selectIdsBeyondHotRetain(candidates, {
@@ -207,7 +252,53 @@ export function selectRetentionForceParkedTerminalWorktrees(
       forceParkedIds.add(candidate.id)
     }
   }
+  addPaneBudgetForceParkedIds(
+    candidates,
+    paneCountsById,
+    forceParkedIds,
+    args.retentionPaneLimit ?? TERMINAL_HIDDEN_WORKTREE_RETENTION_PANE_LIMIT
+  )
   return forceParkedIds
+}
+
+/**
+ * Force-parks whatever the worktree cap left retained once its mounted panes
+ * exceed the pane budget, least-recently-hidden first.
+ *
+ * Why it runs after the cap rather than replacing it: the cap is what keeps the
+ * ordinary rotation warm, and one worktree can legitimately hold more panes
+ * than the budget. The most-recently-hidden worktree is spared here for the
+ * same reason it is spared there — it is the view the user just left, and
+ * remounting it is the cost they actually notice.
+ */
+function addPaneBudgetForceParkedIds(
+  candidates: readonly ColdParkRetainCandidate[],
+  paneCountsById: ReadonlyMap<string, number>,
+  forceParkedIds: Set<string>,
+  paneLimit: number
+): void {
+  const retained = candidates.filter((candidate) => !forceParkedIds.has(candidate.id))
+  if (retained.length <= 1) {
+    return
+  }
+  // Newest hidden first: the same ranking the cap evicts by, reversed.
+  const ranked = [...retained].sort((left, right) => {
+    if (left.hiddenSinceMs !== right.hiddenSinceMs) {
+      return right.hiddenSinceMs - left.hiddenSinceMs
+    }
+    const activationDelta = (right.lastActivatedSeq ?? -1) - (left.lastActivatedSeq ?? -1)
+    return activationDelta === 0 ? left.id.localeCompare(right.id) : activationDelta
+  })
+  let panes = 0
+  for (let index = 0; index < ranked.length; index += 1) {
+    const candidate = ranked[index]
+    // Why 1 and not 0 for an unknown count: a worktree whose layout we cannot
+    // read must never look free, or a missing layout silently lifts the budget.
+    panes += paneCountsById.get(candidate.id) ?? 1
+    if (index > 0 && panes > paneLimit) {
+      forceParkedIds.add(candidate.id)
+    }
+  }
 }
 
 // Why exported: an all-exempt force-park frees nothing, and that degenerate

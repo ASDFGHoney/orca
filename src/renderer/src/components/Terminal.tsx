@@ -120,6 +120,7 @@ import {
   countEvictionExemptTabRoutes,
   formatEvictionExemptRouteCounts,
   createTerminalWorktreeTopologyProjection,
+  countMountedWorktreePanes,
   hasPendingRetentionSpawnWork,
   selectForceParkEvictableTabIds,
   selectRetentionForceParkedTerminalWorktrees,
@@ -1040,6 +1041,10 @@ function Terminal(): React.JSX.Element | null {
     // remote-runtime, uncoverable tabs) force-park beyond a count/TTL bound —
     // added AFTER the coverage veto because darkness for their uncoverable tabs
     // is the accepted cost of bounding retention.
+    // Why getState: this runs in the same pass that decides unmounts, so it is
+    // the current layout catalog; a dep would re-run the whole verdict on every
+    // split resize for a number that only counts leaves.
+    const retentionLayoutsByTabId = useAppStore.getState().terminalLayoutsByTabId
     const retentionBudgetCandidates: TerminalWorktreeRetentionCandidate[] = retentionCandidates.map(
       (candidate) => {
         const tabs = parkingTabsByWorktree[candidate.worktreeId] ?? []
@@ -1069,7 +1074,8 @@ function Terminal(): React.JSX.Element | null {
             parkEligible && worktreeTabsAreWatcherCovered(candidate.worktreeId, tabs),
           hasPendingSpawnWork: tabs.some((tab) =>
             hasPendingRetentionSpawnWork(tab, pendingStartupByTabId)
-          )
+          ),
+          mountedPaneCount: countMountedWorktreePanes(tabs, retentionLayoutsByTabId)
         }
       }
     )
