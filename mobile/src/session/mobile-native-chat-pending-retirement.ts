@@ -157,14 +157,11 @@ export function retireLandedMobileNativeChatPending(
     if (item.images?.length || !item.baselineResolved) {
       continue
     }
-    // Normalized, not `trim()`: a send is caption-less only once control bytes
-    // are off it too, which is how the baseline pass classifies the same item.
-    const text = normalizeReconcileText(item.text)
     const landed =
-      text === ''
+      item.text.trim() === ''
         ? countImageSourceTurnsAfter(messages, item.baselineTailMessageId) >=
           item.expectedOccurrence
-        : (landedCounts.get(text) ?? 0) >= item.expectedOccurrence
+        : (landedCounts.get(normalizeReconcileText(item.text)) ?? 0) >= item.expectedOccurrence
     if (landed) {
       landedPendingIds.add(item.id)
     }
@@ -178,57 +175,28 @@ export function retireLandedMobileNativeChatPending(
       )
 }
 
-/** Pending ids the queue has drained past, which therefore can never land.
- *
- * Why: Claude Code takes a mid-turn send off its queue through a
- * `queued_command` attachment and writes no user record for it at all, so that
- * send has no row to match — ever. Pending renders at the tail, so the echo then
- * replays below every turn that follows and the conversation reads as re-ordered.
- *
- * The evidence is drainage, not a timer: an echo is stranded only once every send
- * issued after it has been accounted for. While any later send is still
- * outstanding the queue has not caught up, and this one's row may yet arrive —
- * including the glue case, where a later send deliberately stays pending because
- * a barrier blocked its run. That keeps the rule from ever dropping a send whose
- * row is merely slow. A trailing unlandable send waits for the next send, and
- * until then it is still the newest bubble, so it is not yet out of order.
- */
+/** Text echoes that queue order proves were consumed without a transcript row. */
 function selectStrandedPendingIds(
   pending: readonly MobileNativeChatPendingMessage[],
   landed: ReadonlySet<string>,
   glued: ReadonlySet<string>
 ): ReadonlySet<string> {
   const stranded = new Set<string>()
-  let accountedAfter = true
-  let hasLater = false
+  let laterAccounted = true
   for (let index = pending.length - 1; index >= 0; index--) {
     const item = pending[index]!
     if (!landed.has(item.id) && !glued.has(item.id)) {
-      if (accountedAfter && hasLater && reconcilesByText(item)) {
+      if (index < pending.length - 1 && laterAccounted && reconcilesByText(item)) {
         stranded.add(item.id)
       } else {
-        accountedAfter = false
+        laterAccounted = false
       }
     }
-    hasLater = true
   }
   return stranded.size === 0 ? NO_PENDING_IDS : stranded
 }
 
-/** Whether drainage says anything about this echo at all.
- *
- * Drainage is evidence that a TEXT match will never arrive, so it only speaks for
- * echoes that reconcile by text and failed. The others must be left alone:
- *
- * - an image echo reconciles when its local preview reaches the authoritative
- *   message, which the count pass holds it for — stranding it deletes the photo
- *   from the chat, since the bubble is the only place it is visible;
- * - a send whose text normalizes away (a caption of only `[Image #N]` markers)
- *   has no key to match on either side, and its transcript row renders empty, so
- *   dropping the echo makes the message vanish rather than merely sit misplaced;
- * - an unresolved baseline was captured against a transcript not known to be this
- *   session's, so drainage around it proves nothing about it.
- */
+/** Drainage is conclusive only for resolved, text-reconciled echoes. */
 function reconcilesByText(item: MobileNativeChatPendingMessage): boolean {
   return item.baselineResolved && !item.images?.length && normalizeReconcileText(item.text) !== ''
 }

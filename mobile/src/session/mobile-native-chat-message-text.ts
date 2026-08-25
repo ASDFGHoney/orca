@@ -14,21 +14,6 @@ export function nativeChatMessageText(blocks: readonly NativeChatBlock[]): strin
 export const FONT_SCALE_MIN = 0.8
 export const FONT_SCALE_MAX = 1.8
 
-export const TEXT_SIZE = 17
-/** The user bubble's designed line box. Kept as a ratio of TEXT_SIZE, not a
- *  standalone number, because pinch-to-zoom has to scale the two together. */
-export const USER_TEXT_LINE_HEIGHT = TEXT_SIZE + 6
-
-/** Zoomed user-bubble text metrics. Scaling only fontSize against a pinned
- *  lineHeight makes zoomed lines overlap and shears the top line's ascenders off
- *  against the bubble padding - reproduced on device at 1.8x. */
-export function scaledUserTextStyle(fontScale: number): {
-  fontSize: number
-  lineHeight: number
-} {
-  return { fontSize: TEXT_SIZE * fontScale, lineHeight: USER_TEXT_LINE_HEIGHT * fontScale }
-}
-
 /** Clamp a proposed font scale into the supported range. */
 export function clampFontScale(scale: number): number {
   if (Number.isNaN(scale)) {

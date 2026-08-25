@@ -1,9 +1,7 @@
 import { StyleSheet } from 'react-native'
 import { colors, radii, spacing, typography } from '../theme/mobile-theme'
-import { TEXT_SIZE, USER_TEXT_LINE_HEIGHT } from './mobile-native-chat-message-text'
 
-export { TEXT_SIZE }
-
+export const TEXT_SIZE = 17
 export const MONO_SIZE = 12
 
 export const styles = StyleSheet.create({
@@ -28,7 +26,7 @@ export const styles = StyleSheet.create({
   userText: {
     color: colors.bgBase,
     fontSize: TEXT_SIZE,
-    lineHeight: USER_TEXT_LINE_HEIGHT,
+    lineHeight: TEXT_SIZE + 6,
     fontWeight: '500'
   },
   controls: {

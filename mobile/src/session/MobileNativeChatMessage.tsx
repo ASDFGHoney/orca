@@ -17,7 +17,7 @@ import { MobileMarkdown } from '../components/MobileMarkdown'
 import { colors } from '../theme/mobile-theme'
 import { isRenderableImageUri } from './mobile-native-chat-image-preview'
 import { styles, TEXT_SIZE } from './mobile-native-chat-message-styles'
-import { nativeChatMessageText, scaledUserTextStyle } from './mobile-native-chat-message-text'
+import { nativeChatMessageText } from './mobile-native-chat-message-text'
 
 const MAX_VISIBLE_TOOL_PAIRS = 6
 const MAX_TOOL_RUN_DIFF_ROWS = 240
@@ -149,7 +149,9 @@ function Prose({
     // Inverted (user) bubbles use a fixed dark-on-light text rather than the
     // markdown renderer's light-on-dark palette.
     if (invert) {
-      return <Text style={[styles.userText, scaledUserTextStyle(fontScale)]}>{block.text}</Text>
+      return (
+        <Text style={[styles.userText, { fontSize: TEXT_SIZE * fontScale }]}>{block.text}</Text>
+      )
     }
     return (
       <MobileMarkdown content={block.text} textScale={1.25 * fontScale} onOpenFile={onOpenFile} />
