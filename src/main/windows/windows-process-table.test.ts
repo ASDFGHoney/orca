@@ -15,7 +15,14 @@ const getAllProcesses = vi.fn()
 const SELF = { pid: process.pid, ppid: 0, name: 'vitest.exe' }
 const NATIVE = [
   SELF,
-  { pid: 100, ppid: 4, name: 'orca.exe', commandLine: '"C:/a b/orca.exe" --x', memory: 4096 }
+  {
+    pid: 100,
+    ppid: 4,
+    name: 'orca.exe',
+    commandLine: '"C:/a b/orca.exe" --x',
+    memory: 4096,
+    creationTimeMs: 1_700_000_000_000
+  }
 ]
 
 describe('windows process table', () => {
@@ -27,7 +34,7 @@ describe('windows process table', () => {
     platform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
       getAllProcesses
     }))
   })
@@ -48,14 +55,15 @@ describe('windows process table', () => {
         ppid: 4,
         name: 'orca.exe',
         command: '"C:/a b/orca.exe" --x',
-        memoryBytes: 4096
+        memoryBytes: 4096,
+        creationTimeMs: 1_700_000_000_000
       }
     ])
   })
 
   it('requests memory and command line together', async () => {
     await readWindowsProcessTableFresh()
-    expect(getAllProcesses.mock.calls[0]?.[1]).toBe(3)
+    expect(getAllProcesses.mock.calls[0]?.[1]).toBe(7)
   })
 
   it('serves repeat reads from the shared snapshot', async () => {
@@ -131,7 +139,7 @@ describe('wedge cooldown', () => {
     vi.useFakeTimers()
     const getAllProcesses = vi.fn(() => {})
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
       getAllProcesses
     }))
 
@@ -153,7 +161,7 @@ describe('wedge cooldown', () => {
     vi.useFakeTimers()
     const getAllProcesses = vi.fn(() => {})
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
       getAllProcesses
     }))
 
@@ -183,7 +191,7 @@ describe('wedge cooldown', () => {
       throw new Error('addon exploded')
     })
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
       getAllProcesses
     }))
 
@@ -192,7 +200,7 @@ describe('wedge cooldown', () => {
 
     // The recovered reader must answer, not report a wedge left by a dead timer.
     __setWindowsProcessTreeLoaderForTests(() => ({
-      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2 },
+      ProcessDataFlag: { None: 0, Memory: 1, CommandLine: 2, CreationTime: 4 },
       getAllProcesses: (cb: (rows: typeof NATIVE | undefined) => void) => cb(NATIVE)
     }))
     await expect(readWindowsProcessTableFresh()).resolves.toHaveLength(NATIVE.length)

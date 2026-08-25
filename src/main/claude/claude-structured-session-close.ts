@@ -23,10 +23,10 @@ export async function closeClaudePublishedSession(input: {
     fence: number
   }) => Promise<void>
   onEvent?: (event: ClaudeStructuredSessionEvent) => void
-}): Promise<void> {
+}): Promise<boolean> {
   const session = input.sessions.get(input.sessionId)
   if (!session) {
-    return
+    return true
   }
   // Keep the live session intact when its durable handoff handle cannot be saved.
   await input.persistHandle?.({
@@ -35,19 +35,13 @@ export async function closeClaudePublishedSession(input: {
     leafUuid: session.leafUuid,
     fence: session.fence
   })
+  const exited = await session.connection.close()
+  if (exited === false) {
+    return false
+  }
   input.sessions.delete(input.sessionId)
   settleClaudeDispatchWaiters(session)
-  const pending = session.prompts.clear()
-  await Promise.allSettled(
-    pending.map((prompt) =>
-      session.connection.respond(prompt.requestId, {
-        behavior: 'deny',
-        message: 'Structured Claude session closed.',
-        interrupt: true,
-        toolUseID: prompt.toolUseId
-      })
-    )
-  )
+  session.prompts.clear()
   input.onEvent?.({
     type: 'handle',
     sessionId: input.sessionId,
@@ -63,5 +57,5 @@ export async function closeClaudePublishedSession(input: {
   session.translator?.handle(ended)
   input.onEvent?.(ended)
   session.translator?.dispose()
-  await session.connection.close()
+  return true
 }

@@ -242,6 +242,28 @@ describe('structured handoff failure injection', () => {
     })
   })
 
+  it('rolls back preparing when provider close cannot prove exit', async () => {
+    suspendNative.mockResolvedValueOnce(false)
+
+    expect(await coordinator.request('client-1', handoff('to-tui', 'now', 2))).toMatchObject({
+      ok: true
+    })
+    await coordinator.drain()
+
+    expect(launchTui).not.toHaveBeenCalled()
+    expect(store.getRecord(SESSION)?.lease).toMatchObject({
+      runtimeKind: 'native',
+      claimStatus: 'live',
+      handoffStage: null,
+      handoffOperationId: null
+    })
+    expect(coordinator.status(SESSION)).toMatchObject({
+      owner: 'native',
+      phase: 'failed',
+      error: { recoverableOwner: 'native' }
+    })
+  })
+
   it('keeps the native owner when cancellation is not acknowledged', async () => {
     await appendRunningTurn()
     acquireNativeStop.mockResolvedValueOnce(false)

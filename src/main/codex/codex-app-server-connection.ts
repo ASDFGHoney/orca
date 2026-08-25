@@ -1,5 +1,4 @@
 import { spawnProcess } from '../../shared/child-process/run-process'
-import { assignHostProcessToKillOnCloseJob } from '../windows/windows-pty-job'
 import { createProviderSpawnSpec } from './codex-app-server-posix-supervisor'
 import { buildCodexAppServerExitError } from './codex-app-server-exit-error'
 import { isAppServerRecord, parseCodexAppServerJsonLine } from './codex-app-server-jsonl'
@@ -70,9 +69,6 @@ export async function openCodexAppServerConnection(
     delete childEnv[key]
   }
   const child = spawnImpl(createProviderSpawnSpec(launch, childEnv, process.platform))
-  if (process.platform === 'win32') {
-    assignHostProcessToKillOnCloseJob()
-  }
   const spawnToken = launch.env?.[CODEX_SPAWN_TOKEN_ENV]
 
   const pending = new Map<number, PendingRequest>()

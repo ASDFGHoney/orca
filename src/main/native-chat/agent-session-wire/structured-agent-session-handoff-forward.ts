@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { AgentSessionHandoffRequest } from '../../../shared/agent-session-wire'
 import {
   abandonStoredAgentSessionHandoffAttempt,
+  rollbackStoredAgentSessionHandoffPreparation,
   reserveStoredAgentSessionHandoffOwner,
   setStoredAgentSessionHandoffStage,
   stopStoredAgentSessionOwnerForHandoff
@@ -37,6 +38,19 @@ export async function handoffStructuredSessionToTui(
   // provider session to a TUI, so an unproven exit must stop here rather than
   // create a second live writer on the same thread.
   if ((await deps.suspendNative(sessionId)) === false) {
+    const current = context.requireRecord(sessionId)
+    if (
+      current.lease.handoffStage === 'preparing' &&
+      current.lease.handoffOperationId === operationId &&
+      current.lease.claimStatus === 'live'
+    ) {
+      await rollbackStoredAgentSessionHandoffPreparation(deps.store, {
+        sessionId,
+        expectedFence: current.lease.runtimeFence,
+        operationId,
+        now: deps.now()
+      })
+    }
     throw new Error('agent_session_owner_exit_unproven')
   }
   record = await stopStoredAgentSessionOwnerForHandoff(deps.store, {

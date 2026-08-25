@@ -61,6 +61,7 @@ function fakeClaude(
     exitBeforeInit?: string
     settings?: unknown
     replayUuid?: string | null
+    closeResult?: boolean
     routes?: Record<string, Route>
   } = {}
 ): {
@@ -135,6 +136,7 @@ function fakeClaude(
       close: async () => {
         connection.closeCount += 1
         connection.closed = true
+        return options.closeResult ?? true
       }
     }
     connections.push(connection)
@@ -221,8 +223,8 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
       spawnToken: 'spawn-9'
     })
     expect(acquisition.link).toEqual({
-      linkId: `claude-7-${PROVIDER_SESSION_ID}-init-uuid`,
-      handle: { provider: 'claude', sessionId: PROVIDER_SESSION_ID, leafUuid: 'init-uuid' },
+      linkId: `claude-7-${PROVIDER_SESSION_ID}-empty`,
+      handle: { provider: 'claude', sessionId: PROVIDER_SESSION_ID, leafUuid: null },
       origin: 'created',
       mintedAtFence: 7,
       observedAt: 1_700_000_000_500
@@ -265,7 +267,7 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(acquisition.link.handle).toEqual({
       provider: 'claude',
       sessionId: PROVIDER_SESSION_ID,
-      leafUuid: 'session-start-uuid'
+      leafUuid: null
     })
     expect(events[0]).toMatchObject({
       type: 'message',
@@ -316,7 +318,7 @@ describe('ClaudeStructuredSessionAdapter.acquire', () => {
     expect(acquisition.link.handle).toEqual({
       provider: 'claude',
       sessionId: PROVIDER_SESSION_ID,
-      leafUuid: 'init-uuid'
+      leafUuid: 'leaf-before'
     })
 
     const wrongClaude = fakeClaude({ initSessionId: 'different-session' })
@@ -698,5 +700,19 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
     expect(claude.connections[0].closeCount).toBe(0)
     expect(events.some((event) => event.type === 'ended')).toBe(false)
     await expect(adapter.closeSession('session-1')).rejects.toThrow('journal unavailable')
+  })
+
+  it('keeps the provider owner indexed when child exit is unproven', async () => {
+    const claude = fakeClaude({ closeResult: false })
+    const events: ClaudeStructuredSessionEvent[] = []
+    const adapter = adapterFor(claude, {}, events)
+    await adapter.acquire({ identity: identityFor(), fence: 7, spawnToken: 'spawn-9' })
+
+    await expect(adapter.closeSession('session-1')).resolves.toBe(false)
+    expect(claude.connections[0].closeCount).toBe(1)
+    expect(events.some((event) => event.type === 'ended')).toBe(false)
+
+    await expect(adapter.closeSession('session-1')).resolves.toBe(false)
+    expect(claude.connections[0].closeCount).toBe(2)
   })
 })

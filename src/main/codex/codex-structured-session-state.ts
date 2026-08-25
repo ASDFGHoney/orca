@@ -123,11 +123,15 @@ export class CodexAcquisitionRegistry {
 
 export async function cancelCodexAcquisitionAttempt(
   attempt: CodexAcquisitionAttempt | undefined
-): Promise<void> {
+): Promise<boolean> {
   if (!attempt) {
-    return
+    return true
   }
   attempt.cancelled = true
-  await attempt.window.connection?.close()
+  const stopped = (await attempt.window.connection?.close()) ?? true
+  if (!stopped) {
+    return false
+  }
   await attempt.finished
+  return true
 }

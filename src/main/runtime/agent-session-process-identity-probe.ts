@@ -15,6 +15,7 @@ import type {
 } from '../../shared/agent-session-lease-adjudication'
 import type { AgentSessionProcessIdentity } from '../../shared/agent-session-record'
 import { runProcess } from '../../shared/child-process/run-process'
+import { readWindowsProcessTableFresh } from '../windows/windows-process-table'
 
 /** Start times drift by scheduler granularity and clock reads; compare with a tolerance. */
 export const PROCESS_START_TIME_TOLERANCE_MS = 2_000
@@ -111,19 +112,8 @@ async function readDarwinProcessStartTimesMs(
 
 async function readWindowsProcessStartTimeMs(pid: number): Promise<number | null> {
   try {
-    const script =
-      `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; ` +
-      'if ($p) { $p.CreationDate.ToUniversalTime().ToString("o") }'
-    const result = await runProcess({
-      program: 'powershell.exe',
-      args: ['-NoProfile', '-NonInteractive', '-Command', script],
-      timeoutMs: PROCESS_START_TIME_TIMEOUT_MS
-    })
-    if (result.timedOut || result.code !== 0) {
-      return null
-    }
-    const parsed = Date.parse(result.stdout.trim())
-    return Number.isFinite(parsed) ? parsed : null
+    const row = (await readWindowsProcessTableFresh()).find((candidate) => candidate.pid === pid)
+    return row?.creationTimeMs ?? null
   } catch {
     return null
   }
