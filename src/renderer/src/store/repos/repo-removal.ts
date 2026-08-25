@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand'
 import { toast } from 'sonner'
 import type { AppState } from '../types'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
+import { getWorktreeIdFromVisitKey, getWorktreeVisitKey } from '@/lib/worktree-visit-recency'
 import { omitSparsePresetsForRepos } from '../slices/sparse-presets'
 import { findRepoForHost, repoMatchesHostIdentity } from '../slices/repo-host-identity'
 import {
@@ -105,6 +106,20 @@ export function createRepoRemovalActions(
 
         // Kill PTYs for all worktrees belonging to this repo
         const worktreeIds = getKnownRepoWorktreeIds(get(), projectId, ownerHostId)
+        // A raw id can be published by two hosts. Keep the purge host-scoped for
+        // those twins so the sibling's qualified visit recency survives.
+        const knownRepoWorktrees = [
+          ...(get().worktreesByRepo[projectId] ?? []),
+          ...(get().detectedWorktreesByRepo[projectId]?.worktrees ?? [])
+        ]
+        const exactSiblingIds = new Set(
+          knownRepoWorktrees
+            .filter((worktree) => !worktreeBelongsToHost(worktree, ownerHostId))
+            .map((worktree) => worktree.id)
+        )
+        const purgeTargets = worktreeIds.map((id) =>
+          exactSiblingIds.has(id) ? { id, hostId: ownerHostId } : id
+        )
         const localAgentContextProjectIds =
           ownerHostId === LOCAL_EXECUTION_HOST_ID
             ? [
@@ -140,7 +155,7 @@ export function createRepoRemovalActions(
         }
 
         // Why: use the canonical per-worktree purge to evict all worktree-scoped maps (hand-deletion leaked most); runs before the set() below so it still sees tabsByWorktree.
-        get().purgeWorktreeTerminalState(worktreeIds)
+        get().purgeWorktreeTerminalState(purgeTargets)
         get().clearLocalDetectedAgentContextsForProjects(localAgentContextProjectIds)
 
         set((s) => {
@@ -179,6 +194,9 @@ export function createRepoRemovalActions(
           }
           // Why: editor state is worktree-scoped; clear the repo's open files + active-file tracking so orphans don't linger in the session save.
           const worktreeIdSet = new Set(worktreeIds)
+          const removedVisitKeys = new Set(
+            worktreeIds.map((worktreeId) => getWorktreeVisitKey(worktreeId, ownerHostId))
+          )
           const nextOpenFiles = s.openFiles.filter((f) => !worktreeIdSet.has(f.worktreeId))
           const nextActiveFileIdByWorktree = { ...s.activeFileIdByWorktree }
           const nextActiveTabTypeByWorktree = { ...s.activeTabTypeByWorktree }
@@ -196,9 +214,11 @@ export function createRepoRemovalActions(
           const repoIdFullyRemoved = !nextRepos.some((r) => r.id === projectId)
           let nextLastVisitedAtByWorktreeId = s.lastVisitedAtByWorktreeId
           for (const id of Object.keys(s.lastVisitedAtByWorktreeId)) {
+            const rawId = getWorktreeIdFromVisitKey(id)
             if (
-              worktreeIdSet.has(id) ||
-              (repoIdFullyRemoved && getRepoIdFromWorktreeId(id) === projectId)
+              (ownerHostId && removedVisitKeys.has(id)) ||
+              (!ownerHostId && worktreeIdSet.has(rawId)) ||
+              (repoIdFullyRemoved && getRepoIdFromWorktreeId(rawId) === projectId)
             ) {
               if (nextLastVisitedAtByWorktreeId === s.lastVisitedAtByWorktreeId) {
                 nextLastVisitedAtByWorktreeId = { ...s.lastVisitedAtByWorktreeId }

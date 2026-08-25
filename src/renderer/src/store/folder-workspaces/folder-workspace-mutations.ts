@@ -11,6 +11,7 @@ import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import { formatFolderWorkspaceCreateError } from '../../lib/folder-workspace-path-status'
 import {
   findFolderWorkspaceOwner,
+  getExecutionHostIdForFolderWorkspace,
   getRuntimeEnvironmentIdForFolderWorkspace
 } from '@/lib/folder-workspace-runtime-owner'
 import { FolderWorkspaceUpdateCoordinator } from '../slices/folder-workspace-update-coordinator'
@@ -213,14 +214,21 @@ export function createFolderWorkspaceMutationActions(
       }
     },
 
-    deleteFolderWorkspace: async (folderWorkspaceId) => {
+    deleteFolderWorkspace: async (folderWorkspaceId, options) => {
       const state = get()
-      if (!findFolderWorkspaceOwner(state, folderWorkspaceId)) {
+      const executionHostId = options?.executionHostId
+      if (!findFolderWorkspaceOwner(state, folderWorkspaceId, executionHostId)) {
         return false
       }
+      const ownerHostId = getExecutionHostIdForFolderWorkspace(
+        state,
+        folderWorkspaceId,
+        executionHostId
+      )
       const runtimeEnvironmentId = getRuntimeEnvironmentIdForFolderWorkspace(
         state,
-        folderWorkspaceId
+        folderWorkspaceId,
+        executionHostId
       )
       try {
         // Why: deletion targets the folder's owner; focus may be on a different host.
@@ -242,11 +250,15 @@ export function createFolderWorkspaceMutationActions(
         const workspaceKey = folderWorkspaceKey(folderWorkspaceId)
         set((s) => ({
           folderWorkspaces: s.folderWorkspaces.filter(
-            (workspace) => workspace.id !== folderWorkspaceId
+            (workspace) =>
+              workspace.id !== folderWorkspaceId ||
+              getFolderWorkspaceHostId(workspace, s.projectGroups) !== ownerHostId
           ),
           folderWorkspacePathStatuses: {}
         }))
-        get().purgeWorktreeTerminalState([workspaceKey])
+        if (!get().folderWorkspaces.some((workspace) => workspace.id === folderWorkspaceId)) {
+          get().purgeWorktreeTerminalState([workspaceKey])
+        }
         return true
       } catch (err) {
         console.error('Failed to delete folder workspace:', err)
