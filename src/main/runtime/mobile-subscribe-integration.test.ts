@@ -851,6 +851,65 @@ describe('mobile subscribe integration', () => {
       expect(ptySizes.get('pty-1')).toEqual({ cols: 150, rows: 40 })
     })
 
+    it('reclaim cancels the soft-leave timer before it can clear the desktop driver', async () => {
+      const { runtime } = createRuntime()
+      await runtime.handleMobileSubscribe('pty-1', 'client-a', { cols: 45, rows: 20 })
+      runtime.handleMobileUnsubscribe('pty-1', 'client-a')
+
+      // The last unsubscribe arms the 250ms soft-leave timer while the fit is held.
+      expect(runtime.getDriver('pty-1')).toEqual({ kind: 'mobile', clientId: 'client-a' })
+      expect(await runtime.reclaimTerminalForDesktop('pty-1')).toBe(true)
+      expect(runtime.getDriver('pty-1')).toEqual({ kind: 'desktop' })
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(runtime.getDriver('pty-1')).toEqual({ kind: 'desktop' })
+    })
+
+    it('reclaim cancels a stale soft-leave timer in the active-subscriber branch', async () => {
+      const { runtime } = createRuntime()
+      await runtime.handleMobileSubscribe('pty-1', 'client-a', { cols: 45, rows: 20 })
+      runtime.handleMobileUnsubscribe('pty-1', 'client-a')
+      // A different client can subscribe while the first client's grace timer is armed.
+      await runtime.handleMobileSubscribe('pty-1', 'client-b', { cols: 40, rows: 18 })
+
+      expect(
+        (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
+      ).toBe(true)
+      await runtime.reclaimTerminalForDesktop('pty-1')
+      expect(
+        (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
+      ).toBe(false)
+    })
+
+    it('reclaim cancels a stale soft-leave timer in the orphan-driver branch', async () => {
+      const { runtime } = createRuntime()
+      await runtime.handleMobileSubscribe('pty-1', 'client-a', { cols: 45, rows: 20 })
+      runtime.handleMobileUnsubscribe('pty-1', 'client-a')
+      // Simulate a stale mobile lock whose fit override was already cleared.
+      const fitOverrides = Reflect.get(runtime, 'terminalFitOverrides') as Map<string, unknown>
+      fitOverrides.delete('pty-1')
+
+      expect(await runtime.reclaimTerminalForDesktop('pty-1')).toBe(true)
+      expect(
+        (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
+      ).toBe(false)
+    })
+
+    it('reclaim cancels pending timers even when no driver lock remains', async () => {
+      const { runtime } = createRuntime()
+      await runtime.handleMobileSubscribe('pty-1', 'client-a', { cols: 45, rows: 20 })
+      runtime.handleMobileUnsubscribe('pty-1', 'client-a')
+      const currentDriver = Reflect.get(runtime, 'currentDriver') as Map<string, { kind: string }>
+      currentDriver.set('pty-1', { kind: 'idle' })
+      const fitOverrides = Reflect.get(runtime, 'terminalFitOverrides') as Map<string, unknown>
+      fitOverrides.delete('pty-1')
+
+      expect(await runtime.reclaimTerminalForDesktop('pty-1')).toBe(false)
+      expect(
+        (Reflect.get(runtime, 'pendingSoftLeavers') as Map<string, unknown>).has('pty-1')
+      ).toBe(false)
+    })
+
     it('reclaimTerminalForDesktop prefers fresh desktop geometry for a held PTY', async () => {
       // Why: manual restore must honor fresh desktop geometry measured while the PTY was phone-held, not the stale baseline.
       settingsState.mobileAutoRestoreFitMs = null
