@@ -117,26 +117,53 @@ export function _setLaunchPathForTests(value: string, key = 'PATH'): void {
   launchPathOverride = { key, value }
 }
 
-function shellProbeEnv(): NodeJS.ProcessEnv {
-  const key = launchPathOverride?.key ?? LAUNCH_PATH_KEY
-  const value = launchPathOverride?.value ?? LAUNCH_PATH
-  const env: NodeJS.ProcessEnv = { ...process.env, [PROBE_MARKER_ENV_VAR]: '1' }
+function isLaunchPathKey(name: string, key: string): boolean {
+  return process.platform === 'win32' ? name.toLowerCase() === key.toLowerCase() : name === key
+}
+
+function applyLaunchPath(env: NodeJS.ProcessEnv, key: string, value: string | null): void {
   if (value === null) {
-    return env
+    return
   }
-  if (process.platform === 'win32') {
-    // Why: the spread is a plain, case-sensitive object, but Windows resolves env
-    // names case-insensitively. Writing our key back without dropping the other
-    // casing leaves the seeded value live under `PATH` beside a clean `Path`, and
-    // the shell may read either one.
-    for (const name of Object.keys(env)) {
-      if (name !== key && name.toLowerCase() === key.toLowerCase()) {
-        delete env[name]
-      }
+  // Why: Windows resolves env names case-insensitively even though a spread is
+  // a plain object, so never leave both the captured key and another casing.
+  for (const name of Object.keys(env)) {
+    if (name !== key && isLaunchPathKey(name, key)) {
+      delete env[name]
     }
   }
   env[key] = value
+}
+
+function shellProbeEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, [PROBE_MARKER_ENV_VAR]: '1' }
+  const key = launchPathOverride?.key ?? LAUNCH_PATH_KEY
+  const value = launchPathOverride?.value ?? LAUNCH_PATH
+  applyLaunchPath(env, key, value)
   return env
+}
+
+/** Run a synchronous launcher without passing Orca's seeded PATH to its child. */
+export function runWithLaunchPath<T>(action: () => T): T {
+  const key = launchPathOverride?.key ?? LAUNCH_PATH_KEY
+  const value = launchPathOverride?.value ?? LAUNCH_PATH
+  if (value === null) {
+    return action()
+  }
+  const previous = Object.entries(process.env).filter(([name]) => isLaunchPathKey(name, key))
+  applyLaunchPath(process.env, key, value)
+  try {
+    return action()
+  } finally {
+    for (const name of Object.keys(process.env)) {
+      if (isLaunchPathKey(name, key)) {
+        delete process.env[name]
+      }
+    }
+    for (const [name, previousValue] of previous) {
+      process.env[name] = previousValue
+    }
+  }
 }
 
 function shellPathProbe(shell: string): { args: string[]; pathDelimiter: string } {
