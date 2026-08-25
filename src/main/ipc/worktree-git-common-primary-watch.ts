@@ -6,6 +6,7 @@ import type {
   WorktreeBaseSubscription,
   WorktreePollerWindowVisibility
 } from './worktree-base-directory-poller'
+import { createSingleFlight } from './single-flight-promise'
 import { PRIMARY_CHECKOUT_METADATA_FILES } from './worktree-git-common-metadata-files'
 import { startGitCommonPrimaryPolling } from './worktree-git-common-primary-polling'
 
@@ -34,34 +35,25 @@ export async function startGitCommonPrimaryWatch(
   let watcher: WatcherProcessSubscription | null = null
   let statusRefPolling: WorktreeBaseSubscription | null = null
   let fallback: WorktreeBaseSubscription | null = null
-  let fallbackPromise: Promise<void> | null = null
+  const fallbackFlight = createSingleFlight()
 
-  const startFallback = (): Promise<void> => {
-    if (fallbackPromise) {
-      return fallbackPromise
-    }
-    const pending = startGitCommonPrimaryPolling(
-      commonDirPath,
-      getStatusRefPaths,
-      onEvents,
-      pollIntervalMs,
-      visibility,
-      onFullScan
-    ).then(async (nextFallback) => {
-      if (disposed || watcher || statusRefPolling) {
-        await nextFallback.unsubscribe()
-        return
-      }
-      fallback = nextFallback
-    })
-    const tracked = pending.finally(() => {
-      if (fallbackPromise === tracked) {
-        fallbackPromise = null
-      }
-    })
-    fallbackPromise = tracked
-    return fallbackPromise
-  }
+  const startFallback = (): Promise<void> =>
+    fallbackFlight.run(() =>
+      startGitCommonPrimaryPolling(
+        commonDirPath,
+        getStatusRefPaths,
+        onEvents,
+        pollIntervalMs,
+        visibility,
+        onFullScan
+      ).then(async (nextFallback) => {
+        if (disposed || watcher || statusRefPolling) {
+          await nextFallback.unsubscribe()
+          return
+        }
+        fallback = nextFallback
+      })
+    )
 
   const stopStatusRefPolling = async (): Promise<void> => {
     const current = statusRefPolling
@@ -115,7 +107,7 @@ export async function startGitCommonPrimaryWatch(
         }
       }
     )
-    if (watcher && !disposed && !fallbackPromise) {
+    if (watcher && !disposed && !fallbackFlight.pending()) {
       statusRefPolling = await startGitCommonPrimaryPolling(
         commonDirPath,
         getStatusRefPaths,
@@ -139,7 +131,7 @@ export async function startGitCommonPrimaryWatch(
         await current.unsubscribe().catch(() => {})
       }
       await stopStatusRefPolling()
-      await fallbackPromise?.catch(() => {})
+      await fallbackFlight.pending()?.catch(() => {})
       if (fallback) {
         await fallback.unsubscribe().catch(() => {})
         fallback = null

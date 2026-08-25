@@ -8,6 +8,7 @@ import type {
   WorktreeBaseSubscription,
   WorktreePollerWindowVisibility
 } from './worktree-base-directory-poller'
+import { createSingleFlight } from './single-flight-promise'
 import { createGitCommonWatchReconciliation } from './worktree-git-common-watch-reconciliation'
 import { startGitCommonPolling } from './worktree-git-common-polling'
 
@@ -30,7 +31,7 @@ export async function startGitCommonNarrowWatch(
   let disposed = false
   let subscription: WorktreeBaseSubscription | null = null
   let existenceTimer: ReturnType<typeof setInterval> | null = null
-  let pollingFallbackPromise: Promise<void> | null = null
+  const pollingFallback = createSingleFlight()
   let subscribing = false
   let parkedWhileHidden = false
   let usingPollingFallback = false
@@ -64,33 +65,31 @@ export async function startGitCommonNarrowWatch(
     isWatcherProcessFailure(error) &&
     (error.code === 'supervisor_crash_fuse' || error.code === 'process_unavailable')
 
-  const ensurePollingFallback = (): Promise<void> => {
-    if (pollingFallbackPromise) {
-      return pollingFallbackPromise
-    }
-    stopExistencePoll()
-    usingPollingFallback = true
-    const pending = reconciliation
-      .unsubscribe()
-      .catch(() => {})
-      .then(() =>
-        startGitCommonPolling(target.path, onEvents, pollIntervalMs, visibility, onFullScan, false)
-      )
-      .then(async (fallback) => {
-        if (disposed || subscription) {
-          await fallback.unsubscribe()
-          return
-        }
-        subscription = fallback
-      })
-    const tracked = pending.finally(() => {
-      if (pollingFallbackPromise === tracked) {
-        pollingFallbackPromise = null
-      }
+  const ensurePollingFallback = (): Promise<void> =>
+    pollingFallback.run(() => {
+      stopExistencePoll()
+      usingPollingFallback = true
+      return reconciliation
+        .unsubscribe()
+        .catch(() => {})
+        .then(() =>
+          startGitCommonPolling(
+            target.path,
+            onEvents,
+            pollIntervalMs,
+            visibility,
+            onFullScan,
+            false
+          )
+        )
+        .then(async (fallback) => {
+          if (disposed || subscription) {
+            await fallback.unsubscribe()
+            return
+          }
+          subscription = fallback
+        })
     })
-    pollingFallbackPromise = tracked
-    return pollingFallbackPromise
-  }
 
   const tryUpgradeToNarrowWatch = async (): Promise<void> => {
     if (disposed || subscribing || subscription) {
@@ -232,7 +231,7 @@ export async function startGitCommonNarrowWatch(
       }
       if (disposed || errored) {
         void sub.unsubscribe().catch(() => {})
-        await pollingFallbackPromise?.catch(() => {})
+        await pollingFallback.pending()?.catch(() => {})
         return !errored || subscription !== null
       }
       subscription = { unsubscribe: () => sub.unsubscribe() }
@@ -261,7 +260,7 @@ export async function startGitCommonNarrowWatch(
       disposed = true
       stopExistencePoll()
       unsubscribeVisibility()
-      await pollingFallbackPromise?.catch(() => {})
+      await pollingFallback.pending()?.catch(() => {})
       nativeSubscriptionGeneration++
       const current = subscription
       subscription = null
