@@ -64,10 +64,10 @@ import { resolveStableForegroundProcess } from './stable-foreground-process'
 import { getAgentForegroundContextPaths } from './agent-foreground-context-paths'
 import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
 import { killWithDescendantSweep } from '../pty-descendant-termination'
-import { readWindowsConptyProcessIds } from './windows-conpty-process-membership'
+import { readWindowsPtyJobProcessIds } from './windows-pty-job-membership'
 import { readWindowsConsoleAttachedProcessIds } from './windows-console-attached-processes'
 import { terminatePtyJob } from '../windows/windows-pty-job'
-import { canConfirmAgentFromConsolePresence } from './windows-console-foreground'
+import { canRevalidateCachedAgentWithoutScan } from './windows-cached-agent-revalidation'
 import { forceKillPosixPtyProcessGroups } from '../pty/posix-pty-process-groups'
 import { shouldUseShellReadyStartupDelivery } from '../../shared/codex-startup-delivery'
 import { assertSafeAgentStartupCwd, resolveSafePtyDefaultCwd } from './pty-default-cwd'
@@ -1415,10 +1415,10 @@ export class LocalPtyProvider implements IPtyProvider {
     // so needs no forked helper (#10857).
     if (
       process.platform === 'win32' &&
-      canConfirmAgentFromConsolePresence(cachedAgent, fallbackProcess)
+      canRevalidateCachedAgentWithoutScan(cachedAgent, fallbackProcess)
     ) {
       try {
-        const paneProcessIds = readWindowsConptyProcessIds(proc)
+        const paneProcessIds = readWindowsPtyJobProcessIds(proc)
         if (ptyProcesses.get(id) !== proc) {
           return null
         }
@@ -1447,7 +1447,7 @@ export class LocalPtyProvider implements IPtyProvider {
       const resolvedAgent = resolution.processName
         ? recognizeAgentProcessFromCommandLine(resolution.processName)
         : null
-      // Why: incomplete snapshot + unavailable console probe isn't exit proof; only shell-only membership may clear the cache.
+      // Why: incomplete snapshot + unavailable job read isn't exit proof; only shell-only membership may clear the cache.
       const stable = resolveStableForegroundProcess(
         paneMembershipUnavailable && resolvedAgent === null
           ? { ...resolution, available: false }

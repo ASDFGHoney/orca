@@ -1,7 +1,7 @@
 import type { IPty } from 'node-pty'
 import { listPtyJobProcessIds } from '../windows/windows-pty-job'
 
-type WindowsConptyMembershipDeps = {
+type WindowsPtyJobMembershipDeps = {
   listJobProcessIds?: (proc: IPty) => readonly number[] | null
 }
 
@@ -31,9 +31,9 @@ type WindowsConptyMembershipDeps = {
  * an unpatched node-pty, a non-ConPTY terminal, or a tree no longer tracked.
  * It is never evidence that processes died.
  */
-export function readWindowsConptyProcessIds(
+export function readWindowsPtyJobProcessIds(
   proc: IPty,
-  deps: WindowsConptyMembershipDeps = {}
+  deps: WindowsPtyJobMembershipDeps = {}
 ): ReadonlySet<number> | null {
   const pids = (deps.listJobProcessIds ?? listPtyJobProcessIds)(proc)
   if (!pids) {
@@ -45,8 +45,10 @@ export function readWindowsConptyProcessIds(
       membership.add(pid)
     }
   }
-  // Why reject an empty set: the job answering with no members at all is not
-  // the shell-alone case callers decide on -- it means the tree is gone, which
-  // this function has never been the one to report.
-  return membership.size > 0 ? membership : null
+  // Why require the shell: callers read a size-1 set as "the shell is alone, so
+  // retire the agent". A set of one pid that is NOT the shell means the shell
+  // already exited with a descendant still up -- the opposite state, and one the
+  // forked probe this replaced refused outright (it required the root in the raw
+  // list). Reporting unverifiable keeps that refusal.
+  return membership.has(proc.pid) ? membership : null
 }

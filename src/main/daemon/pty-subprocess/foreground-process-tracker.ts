@@ -2,7 +2,7 @@ import type * as pty from 'node-pty'
 import { win32 as pathWin32 } from 'node:path'
 import { getAgentForegroundContextPaths } from '../../providers/agent-foreground-context-paths'
 import { resolveAgentForegroundProcessWithAvailability } from '../../providers/agent-foreground-process'
-import { readWindowsConptyProcessIds } from '../../providers/windows-conpty-process-membership'
+import { readWindowsPtyJobProcessIds } from '../../providers/windows-pty-job-membership'
 import { readWindowsConsoleAttachedProcessIds } from '../../providers/windows-console-attached-processes'
 import {
   isAgentForegroundWrapperProcess,
@@ -16,6 +16,11 @@ import { parsePtySessionId } from '../pty-session-id'
 const FOREGROUND_AGENT_CACHE_TTL_MS = 1000
 const SHELL_FOREGROUND_REFRESH_RETRY_MS = 5_000
 const WINDOWS_IDLE_SHELL_FOREGROUND_REFRESH_RETRY_MS = 15_000
+// Why 30s: the job answers a SUPERSET of the console, so "something else is
+// alive" cannot tell a working agent from a console-detached leftover. Age is
+// the tiebreak, and only successful scans that found no agent advance it (an
+// unavailable scan returns before this). 5x the renderer's 6s confirm ladder.
+const WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS = 30_000
 const SHELL_FOREGROUND_OUTPUT_HOT_WINDOW_MS = 10_000
 const STARTUP_AGENT_FOREGROUND_BOOTSTRAP_MS = 5_000
 
@@ -122,13 +127,16 @@ export function createPtyForegroundProcessTracker(args: {
     }
     foregroundRefreshInFlight = true
     lastForegroundRefreshStartedAt = now
-    const retireStaleForegroundIdentity = (): void => {
+    const retireStaleForegroundIdentity = ({ onlyWhenAged = false } = {}): void => {
       const currentFallbackProcess = getFallbackProcess()
+      const identityAgeMs =
+        cachedAgentForeground === null ? 0 : Date.now() - cachedAgentForeground.refreshedAt
       if (
         fallbackIsShell &&
         !getActiveStartupAgent() &&
         currentFallbackProcess !== null &&
-        isShellProcess(currentFallbackProcess)
+        isShellProcess(currentFallbackProcess) &&
+        (!onlyWhenAged || identityAgeMs > WINDOWS_DETACHED_DESCENDANT_IDENTITY_MAX_AGE_MS)
       ) {
         cachedAgentForeground = null
         startupAgentForeground = null
@@ -152,11 +160,18 @@ export function createPtyForegroundProcessTracker(args: {
           if (process.platform === 'win32' && fallbackIsShell && cachedAgentForeground !== null) {
             // Job, not console: "is anything besides the shell alive?" needs no
             // console attachment, so it needs no forked helper (#10857).
-            const paneProcessIds = readWindowsConptyProcessIds(proc)
-            if (paneProcessIds === null || paneProcessIds.size > 1) {
+            const paneProcessIds = readWindowsPtyJobProcessIds(proc)
+            // Unverifiable is never exit proof (ssh-execution-boundary.md): hold.
+            if (paneProcessIds === null) {
               return
             }
-            retireStaleForegroundIdentity()
+            // A superset answer is not proof of life -- a WSL pane keeps
+            // console-detached plumbing in its job, so `size > 1` stays true
+            // forever and used to veto retirement outright. That pinned a dead
+            // agent's name (#9258's bug, new mechanism) and, because a non-null
+            // cache makes idleNoEvidenceShell false, pinned the refresh at 1s
+            // and defeated the 15s idle backoff. Let age settle it instead.
+            retireStaleForegroundIdentity({ onlyWhenAged: paneProcessIds.size > 1 })
             return
           }
           retireStaleForegroundIdentity()

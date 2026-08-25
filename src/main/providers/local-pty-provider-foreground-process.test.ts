@@ -10,7 +10,7 @@ const {
   spawnMock,
   prepareMacosTccLoginShellMock,
   resolveAgentForegroundProcessMock,
-  readWindowsConptyProcessIdsMock,
+  readWindowsPtyJobProcessIdsMock,
   killWithDescendantSweepMock,
   isWslAvailableAsyncMock,
   wslUncDirectoryExistsMock,
@@ -24,7 +24,7 @@ const {
   spawnMock: vi.fn(),
   prepareMacosTccLoginShellMock: vi.fn(),
   resolveAgentForegroundProcessMock: vi.fn(),
-  readWindowsConptyProcessIdsMock: vi.fn(),
+  readWindowsPtyJobProcessIdsMock: vi.fn(),
   killWithDescendantSweepMock: vi.fn(),
   isWslAvailableAsyncMock: vi.fn(),
   wslUncDirectoryExistsMock: vi.fn(),
@@ -84,8 +84,8 @@ vi.mock('./agent-foreground-process', () => ({
     resolveAgentForegroundProcessMock(...args)
 }))
 
-vi.mock('./windows-conpty-process-membership', () => ({
-  readWindowsConptyProcessIds: (...args: unknown[]) => readWindowsConptyProcessIdsMock(...args)
+vi.mock('./windows-pty-job-membership', () => ({
+  readWindowsPtyJobProcessIds: (...args: unknown[]) => readWindowsPtyJobProcessIdsMock(...args)
 }))
 
 vi.mock('../wsl', () => ({
@@ -137,7 +137,7 @@ describe('LocalPtyProvider', () => {
       writeFileSyncMock,
       prepareMacosTccLoginShellMock,
       resolveAgentForegroundProcessMock,
-      readWindowsConptyProcessIdsMock,
+      readWindowsPtyJobProcessIdsMock,
       killWithDescendantSweepMock,
       isWslAvailableAsyncMock,
       wslUncDirectoryExistsMock,
@@ -236,7 +236,7 @@ describe('LocalPtyProvider', () => {
         processName: 'claude'
       })
       // A child beyond the shell is still attached to this console.
-      readWindowsConptyProcessIdsMock.mockReturnValue(new Set([12345, 999]))
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345, 999]))
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       // First call establishes the agent identity via the scan.
@@ -254,7 +254,7 @@ describe('LocalPtyProvider', () => {
         available: true,
         processName: 'claude'
       })
-      readWindowsConptyProcessIdsMock.mockReturnValue(new Set([12345]))
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345]))
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
@@ -268,7 +268,7 @@ describe('LocalPtyProvider', () => {
       resolveAgentForegroundProcessMock
         .mockResolvedValueOnce({ available: true, processName: 'claude' })
         .mockResolvedValue({ available: true, processName: null })
-      readWindowsConptyProcessIdsMock.mockReturnValue(null)
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(null)
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')
@@ -282,7 +282,7 @@ describe('LocalPtyProvider', () => {
       resolveAgentForegroundProcessMock
         .mockResolvedValueOnce({ available: true, processName: 'claude' })
         .mockResolvedValue({ available: true, processName: null })
-      readWindowsConptyProcessIdsMock.mockReturnValue(new Set([12345]))
+      readWindowsPtyJobProcessIdsMock.mockReturnValue(new Set([12345]))
       const { id } = await provider.spawn({ cols: 80, rows: 24 })
 
       await expect(provider.getForegroundProcess(id)).resolves.toBe('claude')

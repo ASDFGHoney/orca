@@ -11,11 +11,11 @@ vi.mock('node:child_process', async (importOriginal) => ({
   fork: forkMock
 }))
 
-import { readWindowsConptyProcessIds } from './windows-conpty-process-membership'
+import { readWindowsPtyJobProcessIds } from './windows-pty-job-membership'
 
 const pty = (pid = 100): IPty => ({ pid }) as unknown as IPty
 
-describe('readWindowsConptyProcessIds', () => {
+describe('readWindowsPtyJobProcessIds', () => {
   it('never spawns a child process to answer', () => {
     // The whole point. node-pty answers console membership by FORKING a helper,
     // and Orca asked on a foreground poll, per pane -- hundreds of hidden
@@ -27,7 +27,7 @@ describe('readWindowsConptyProcessIds', () => {
     forkMock.mockClear()
 
     for (let read = 0; read < 50; read += 1) {
-      readWindowsConptyProcessIds(pty(), { listJobProcessIds })
+      readWindowsPtyJobProcessIds(pty(), { listJobProcessIds })
     }
 
     expect(forkMock).not.toHaveBeenCalled()
@@ -35,14 +35,14 @@ describe('readWindowsConptyProcessIds', () => {
   })
 
   it('reports the shell alone, which is what lets a stale agent be retired', () => {
-    const membership = readWindowsConptyProcessIds(pty(), { listJobProcessIds: () => [100] })
+    const membership = readWindowsPtyJobProcessIds(pty(), { listJobProcessIds: () => [100] })
 
     expect(membership).toEqual(new Set([100]))
     expect(membership?.size).toBe(1)
   })
 
   it('reports descendants, which is what keeps a live agent cached', () => {
-    const membership = readWindowsConptyProcessIds(pty(), {
+    const membership = readWindowsPtyJobProcessIds(pty(), {
       listJobProcessIds: () => [100, 200, 300]
     })
 
@@ -56,11 +56,11 @@ describe('readWindowsConptyProcessIds', () => {
     // null is never evidence that processes died
     // (docs/reference/ssh-execution-boundary.md). An empty list means the tree
     // is gone, which this function has never been the one to report.
-    expect(readWindowsConptyProcessIds(pty(), { listJobProcessIds: () => pids })).toBeNull()
+    expect(readWindowsPtyJobProcessIds(pty(), { listJobProcessIds: () => pids })).toBeNull()
   })
 
   it('drops nonsense pids rather than trusting the whole answer', () => {
-    const membership = readWindowsConptyProcessIds(pty(), {
+    const membership = readWindowsPtyJobProcessIds(pty(), {
       listJobProcessIds: () => [100, 0, -1, 1.5, 200]
     })
 
@@ -69,6 +69,31 @@ describe('readWindowsConptyProcessIds', () => {
 })
 
 describe('why the filter does NOT use this', () => {
+  it('refuses an answer that does not contain the shell', () => {
+    // Shell exited, a descendant is still up. Size 1 -- but reading that as
+    // "the shell is alone, retire the agent" inverts the truth. The forked
+    // probe this replaced required the root in the raw list; so does this.
+    const membership = readWindowsPtyJobProcessIds(pty(100), {
+      listJobProcessIds: () => [200]
+    })
+
+    expect(membership).toBeNull()
+  })
+
+  it('is asked with the pty handle, because a bare pid cannot find the job', () => {
+    // ptyJobTarget reads node-pty's private `_pty` id off the object and pairs
+    // it with proc.pid; the native side refuses on a mismatch. Passing proc.pid
+    // instead of proc types fine at some call sites but makes every pane report
+    // unverifiable, so pin the argument.
+    const listJobProcessIds = vi.fn(() => [100])
+    const proc = pty(100)
+
+    readWindowsPtyJobProcessIds(proc, { listJobProcessIds })
+
+    expect(listJobProcessIds).toHaveBeenCalledWith(proc)
+    expect(listJobProcessIds).not.toHaveBeenCalledWith(100)
+  })
+
   it('documents that job membership keeps console-detached descendants', () => {
     // The candidate filter in windows-agent-foreground-process.ts exists to DROP
     // a descendant that left the console (`Start-Process droid`, a GUI child).
@@ -81,7 +106,7 @@ describe('why the filter does NOT use this', () => {
     // vs console [69908,40980] -- the job is a superset. Harmless for the
     // `size > 1` callers, wrong for the filter.
     const detachedChild = 104068
-    const membership = readWindowsConptyProcessIds(pty(40980), {
+    const membership = readWindowsPtyJobProcessIds(pty(40980), {
       listJobProcessIds: () => [40980, detachedChild]
     })
 

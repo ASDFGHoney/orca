@@ -1,7 +1,7 @@
 import { isShellProcess } from '../../shared/shell-process-detection'
 
-/** Whether ConPTY membership can revalidate a cached agent without a process scan. */
-export function canConfirmAgentFromConsolePresence(
+/** Whether job membership can revalidate a cached agent without a process scan. */
+export function canRevalidateCachedAgentWithoutScan(
   cachedAgentName: string | null,
   fallbackProcess: string | null
 ): boolean {
