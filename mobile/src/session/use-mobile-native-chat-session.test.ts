@@ -645,6 +645,11 @@ describe('useMobileNativeChatSession transcriptLoading', () => {
     })
     await mountAt({ subscribe } as unknown as RpcClient, 'session-a')
 
+    expect(subscribe).toHaveBeenCalledWith(
+      'nativeChat.subscribe',
+      expect.objectContaining({ capabilities: { transcriptPending: 1 } }),
+      expect.any(Function)
+    )
     expect(renders.at(-1)).toMatchObject({
       status: 'awaiting-transcript',
       transcriptLoading: true,

@@ -451,7 +451,7 @@ describe('nativeChat.subscribe initial snapshot', () => {
     watcher.args = null
     const emitted: unknown[] = []
     await subscribeHandler()(
-      { agent: 'claude', sessionId: 's' },
+      { agent: 'claude', sessionId: 's', capabilities: { transcriptPending: 1 } },
       streamingContext('mobile'),
       (value) => emitted.push(value)
     )
@@ -466,6 +466,20 @@ describe('nativeChat.subscribe initial snapshot', () => {
     expect(emitted[1]).toMatchObject({ type: 'snapshot', hasMore: false })
     // The real window is authoritative and carries no pending marker.
     expect((emitted[1] as { pending?: boolean }).pending).toBeUndefined()
+  })
+
+  it('does not publish pending semantics to a legacy client', async () => {
+    watcher.watching = true
+    watcher.args = null
+    const emitted: unknown[] = []
+    await subscribeHandler()(
+      { agent: 'claude', sessionId: 's' },
+      streamingContext('mobile'),
+      (value) => emitted.push(value)
+    )
+
+    expect(activeWatcherArgs().onTranscriptPending).toBeUndefined()
+    expect(emitted).toEqual([])
   })
 
   it('emits one windowed snapshot with pagination state before live appends', async () => {

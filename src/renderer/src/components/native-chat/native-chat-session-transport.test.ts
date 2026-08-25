@@ -181,6 +181,13 @@ describe('runtime subscribe', () => {
     transport.subscribe({ subscriptionId: 's-1', agent: 'claude', sessionId: 'sess-1' }, onFrame)
     await Promise.resolve()
 
+    expect(runtimeEnvironmentsSubscribe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        params: expect.objectContaining({ capabilities: { transcriptPending: 1 } })
+      }),
+      expect.any(Object)
+    )
+
     deliver({ type: 'appended', messages: [message('m-1')] })
     deliver({ type: 'snapshot', messages: [message('m-snapshot')] })
     deliver({ type: 'replacement', messages: [message('m-replacement')], hasMore: true })

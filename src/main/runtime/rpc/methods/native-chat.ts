@@ -48,6 +48,10 @@ const NativeChatSession = z.object({
   // locate the file directly when the session id no longer names it (recent
   // Claude Code). Optional for back-compat with older clients.
   transcriptPath: z.string().min(1).optional(),
+  // A pending snapshot is not authoritative transcript history. Only clients
+  // that advertise this semantic may receive one; legacy clients treat it as a
+  // settled empty read and can overwrite retention / unblock launch drafts.
+  capabilities: z.object({ transcriptPending: z.literal(1).optional() }).optional(),
   beforeOffset: z.number().int().nonnegative().optional()
 })
 
@@ -288,14 +292,15 @@ export const NATIVE_CHAT_METHODS: readonly RpcAnyMethod[] = [
             ...(lifecycle ? { lifecycle } : {})
           })
         },
-        onTranscriptPending: () => {
-          if (closed) {
-            return
-          }
-          // `pending` marks a window with no transcript behind it yet; clients
-          // that don't know the flag still stop spinning on the empty snapshot.
-          emit({ type: 'snapshot', messages: [], hasMore: false, pending: true })
-        },
+        ...(params.capabilities?.transcriptPending === 1
+          ? {
+              onTranscriptPending: () => {
+                if (!closed) {
+                  emit({ type: 'snapshot', messages: [], hasMore: false, pending: true })
+                }
+              }
+            }
+          : {}),
         onReplace: (messages, hasMore, beforeOffset, lifecycle) => {
           if (closed) {
             return

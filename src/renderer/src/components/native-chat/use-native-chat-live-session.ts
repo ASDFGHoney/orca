@@ -186,7 +186,7 @@ export function useNativeChatLiveSession(
 
     // Independent initial seed in case subscribe never delivers a snapshot; applied only until an authoritative frame lands so a live snapshot wins.
     function loadSession(attempt: number): void {
-      if (!latestEnabled.current || frameArrived) {
+      if (!latestEnabled.current || frameArrived || transcriptPending) {
         return
       }
       void transport
@@ -196,16 +196,16 @@ export function useNativeChatLiveSession(
             return
           }
           if (result && 'error' in result) {
-            // A not-yet-flushed transcript: stay unsettled and retry with backoff instead of a permanent error (#8401).
-            // The window is a guess at how long a flush takes; once the host has said the
-            // transcript is pending we know it, so a never-prompted session never expires
-            // into an error card.
-            if (
-              result.notFound &&
-              (transcriptPending || Date.now() - retryStartedAt < NOTFOUND_RETRY_WINDOW_MS)
-            ) {
-              retryTimer.schedule(attempt, () => loadSession(attempt + 1))
-              return
+            if (result.notFound) {
+              // The live stream owns recovery once it confirms the missing file;
+              // an older host gets the bounded seed retry as its fallback.
+              if (transcriptPending) {
+                return
+              }
+              if (Date.now() - retryStartedAt < NOTFOUND_RETRY_WINDOW_MS) {
+                retryTimer.schedule(attempt, () => loadSession(attempt + 1))
+                return
+              }
             }
             setRead({ phase: 'error', error: result.error })
             return
@@ -250,8 +250,11 @@ export function useNativeChatLiveSession(
           if (frame.type === 'snapshot' && frame.pending === true) {
             // No transcript exists yet (an agent that hasn't flushed, or was never
             // prompted). Move off 'loading' so the view stops spinning, but keep
-            // the seed loop armed and the appended tail intact — this is not a read.
+            // an in-flight seed and appended tail eligible — this is not a read.
             transcriptPending = true
+            // The live resolve-poll stream now owns the eventual initial drain;
+            // stop duplicating its filesystem probes forever from the renderer.
+            retryTimer.cancel()
             setRead({ phase: 'awaiting' })
             return
           }

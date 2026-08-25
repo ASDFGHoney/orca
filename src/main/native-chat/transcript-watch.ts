@@ -113,8 +113,10 @@ function subscribeViaResolvePoll(
     args.onTranscriptPending()
   }
 
-  settleTimer = setTimeout(settleUnflushed, UNFLUSHED_SETTLE_MS)
-  settleTimer.unref?.()
+  if (args.onTranscriptPending) {
+    settleTimer = setTimeout(settleUnflushed, UNFLUSHED_SETTLE_MS)
+    settleTimer.unref?.()
+  }
 
   function scheduleAttempt(): void {
     if (closed) {

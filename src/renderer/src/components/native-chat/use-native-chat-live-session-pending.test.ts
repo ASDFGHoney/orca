@@ -154,22 +154,28 @@ describe('useNativeChatLiveSession — unflushed transcript (pending frame)', ()
     expect(latest?.readPhase).toBe('error')
   })
 
-  it('never expires into an error card once the host reports the transcript pending', async () => {
+  it('stops duplicate seed polling once the live stream owns the pending transcript', async () => {
     // The reported bug: a tab that is never prompted never writes a transcript, so
     // every read is notFound forever. The host has told us that is expected.
     vi.useFakeTimers()
-    transport.readSession.mockResolvedValue({ error: 'no transcript', notFound: true })
+    let settleRead = (_result: { error: string; notFound: true }): void => {}
+    transport.readSession.mockImplementationOnce(
+      () => new Promise((resolve) => (settleRead = resolve))
+    )
     await render()
 
     await emit(PENDING_FRAME)
     await act(async () => {
+      settleRead({ error: 'no transcript', notFound: true })
+      await Promise.resolve()
       await vi.advanceTimersByTimeAsync(NOTFOUND_RETRY_WINDOW_MS + 30_000)
     })
 
     expect(latest?.readPhase).toBe('awaiting')
     expect(latest?.status).not.toBe('error')
-    // Still retrying, so the transcript backfills whenever the user does prompt.
-    expect(transport.readSession.mock.calls.length).toBeGreaterThan(1)
+    // The resolve-poll subscription owns the eventual initial drain; continuing
+    // the seed too would issue one redundant filesystem read every 10 seconds.
+    expect(transport.readSession).toHaveBeenCalledOnce()
   })
 
   it('does not drop live appends already merged into the window', async () => {

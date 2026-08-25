@@ -45,7 +45,8 @@ export function createWebNativeChatApi(): NativeChatApi {
             sessionId: args.sessionId,
             subscriptionId: args.subscriptionId,
             transcriptPath: args.transcriptPath,
-            limit: args.limit
+            limit: args.limit,
+            capabilities: { transcriptPending: 1 }
           },
           {
             onResponse: (response) => {

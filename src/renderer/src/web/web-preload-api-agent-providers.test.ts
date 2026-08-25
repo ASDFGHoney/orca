@@ -96,13 +96,15 @@ describe('web native chat preload API', () => {
       source: 'transcript' as const
     }
     let deliver: (result: unknown) => void = () => {}
+    let subscribeParams: unknown
     vi.doMock('./web-runtime-client', () => ({
       WebRuntimeClient: class {
         subscribe(
           _method: string,
-          _params: unknown,
+          params: unknown,
           callbacks: { onResponse: (response: RuntimeRpcResponse<unknown>) => void }
         ): Promise<{ unsubscribe: () => void }> {
+          subscribeParams = params
           deliver = (result) =>
             callbacks.onResponse({
               id: 'stream-1',
@@ -127,6 +129,8 @@ describe('web native chat preload API', () => {
       (frame) => frames.push(frame)
     )
     await Promise.resolve()
+
+    expect(subscribeParams).toMatchObject({ capabilities: { transcriptPending: 1 } })
 
     // The host's unflushed-transcript frame, then the flush that follows it.
     deliver({ type: 'snapshot', messages: [], hasMore: false, pending: true })
