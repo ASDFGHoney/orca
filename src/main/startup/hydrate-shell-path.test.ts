@@ -197,6 +197,33 @@ describe('hydrateShellPath', () => {
     expect(spawnMock.mock.calls[0][2].env.PATH).toBe('/usr/bin')
   })
 
+  it('overwrites the recorded key in place so Windows never carries both Path and PATH', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const proc = createMockShellProcess()
+    spawnMock.mockReturnValue(proc)
+    const originalWindowsPath = process.env.Path
+    delete process.env.PATH
+    process.env.Path = `C:\\Users\\u\\.nvm\\versions\\node\\v22.9.0\\bin;C:\\Windows`
+    recordLaunchPath('C:\\Windows', 'Path')
+
+    try {
+      const resultPromise = hydrateShellPath({ shellOverride: 'C:/Git/bin/bash.exe', force: true })
+      await vi.waitFor(() => expect(spawnMock).toHaveBeenCalled())
+      proc.emit('close', 0)
+      await resultPromise
+
+      const env = spawnMock.mock.calls[0][2].env
+      expect(env.Path).toBe('C:\\Windows')
+      expect(env.PATH).toBeUndefined()
+    } finally {
+      if (originalWindowsPath === undefined) {
+        delete process.env.Path
+      } else {
+        process.env.Path = originalWindowsPath
+      }
+    }
+  })
+
   it('falls back to process.env when no launch PATH was recorded', async () => {
     const proc = createMockShellProcess()
     spawnMock.mockReturnValue(proc)

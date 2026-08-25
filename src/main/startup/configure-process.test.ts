@@ -74,7 +74,7 @@ describe('patchPackagedProcessPath', () => {
 
     patchPackagedProcessPath()
 
-    expect(recorded).toHaveBeenCalledWith('/usr/bin:/bin')
+    expect(recorded).toHaveBeenCalledWith('/usr/bin:/bin', 'PATH')
     // Why: recording must happen before the seeds land, or the probe sees them anyway.
     expect(process.env.PATH).not.toBe('/usr/bin:/bin')
   })

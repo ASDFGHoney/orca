@@ -36,9 +36,11 @@ let probeQueue = Promise.resolve()
 // ahead of PATH before we probe. nvm's startup `use` honors whatever node is
 // already on PATH over the user's `default` alias, so a probe that inherits the
 // seed comes back pinned to that version and every terminal loses the global
-// CLIs installed under `default`. Probe with the launch PATH instead. win32 is
-// exempt: it keys PATH as `Path`, and no Windows seed pins a node version.
+// CLIs installed under `default`. Probe with the launch PATH instead. The key is
+// recorded too because Windows keys it `Path`, and a Git Bash user whose nvm uses
+// the POSIX ~/.nvm/versions/node layout gets a version-pinned seed there as well.
 let launchPath: string | null = null
+let launchPathKey = 'PATH'
 let configuredWindowsShell = 'powershell.exe'
 let configuredWindowsGitBashPath: string | null = null
 let configuredWindowsFallbackShell: string | null = null
@@ -50,6 +52,7 @@ export function _resetHydrateShellPathCache(): void {
   cached = null
   probeQueue = Promise.resolve()
   launchPath = null
+  launchPathKey = 'PATH'
   configuredWindowsShell = 'powershell.exe'
   configuredWindowsGitBashPath = null
   configuredWindowsFallbackShell = null
@@ -103,15 +106,18 @@ function parseCapturedPath(stdout: string, pathDelimiter: string = delimiter): s
 }
 
 /** Records PATH as the process was launched with, before Orca seeds fallbacks onto it. */
-export function recordLaunchPath(pathValue: string): void {
+export function recordLaunchPath(pathValue: string, pathKey = 'PATH'): void {
   launchPath = pathValue
+  launchPathKey = pathKey
 }
 
 function shellProbeEnv(): NodeJS.ProcessEnv {
-  if (process.platform === 'win32' || launchPath === null) {
+  if (launchPath === null) {
     return process.env
   }
-  return { ...process.env, PATH: launchPath }
+  // Why the recorded key, not a literal 'PATH': overwrite the entry in place so
+  // Windows never ends up carrying both `Path` and `PATH`.
+  return { ...process.env, [launchPathKey]: launchPath }
 }
 
 function shellPathProbe(shell: string): { args: string[]; pathDelimiter: string } {

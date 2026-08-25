@@ -144,7 +144,7 @@ export function patchPackagedProcessPath(): void {
   // `use` keeps whatever node is already on PATH instead of the user's
   // `default` alias, so a seeded version dir would pin every terminal to the
   // newest install and hide global CLIs installed under `default`.
-  recordLaunchPath(currentPath)
+  recordLaunchPath(currentPath, pathKey)
   const pathDelimiter = getProcessPathDelimiter()
   const existing = new Set(currentPath.split(pathDelimiter))
   const missing = extraPaths.filter((path) => !existing.has(path))
