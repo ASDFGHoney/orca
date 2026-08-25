@@ -16053,6 +16053,7 @@ export class OrcaRuntimeService {
   // frame. Returns `true` whenever there was a lock to reclaim, `false` only
   // when there was nothing to reclaim.
   async reclaimTerminalForDesktop(ptyId: string): Promise<boolean> {
+    this.cancelPendingDriverMutations(ptyId)
     if (this.isMobileSubscriberActive(ptyId)) {
       this.setMobileDisplayMode(ptyId, 'desktop')
       await this.applyMobileDisplayMode(ptyId)
@@ -16072,16 +16073,6 @@ export class OrcaRuntimeService {
     }
     const heldOverride = this.terminalFitOverrides.get(ptyId)
     if (heldOverride && this.hasRemoteDesktopLayoutState(ptyId)) {
-      const pending = this.pendingRestoreTimers.get(ptyId)
-      if (pending) {
-        clearTimeout(pending.timer)
-        this.pendingRestoreTimers.delete(ptyId)
-      }
-      const softLeaver = this.pendingSoftLeavers.get(ptyId)
-      if (softLeaver) {
-        clearTimeout(softLeaver.timer)
-        this.pendingSoftLeavers.delete(ptyId)
-      }
       // Why: applyRemoteDesktopLayout no-ops while the driver still reads mobile.
       this.setDriver(ptyId, { kind: 'idle' })
       // Why: best-effort, like the local held branch below. A host whose resize
@@ -16094,11 +16085,6 @@ export class OrcaRuntimeService {
       return true
     }
     if (heldOverride) {
-      const pending = this.pendingRestoreTimers.get(ptyId)
-      if (pending) {
-        clearTimeout(pending.timer)
-        this.pendingRestoreTimers.delete(ptyId)
-      }
       // Why: with no subscribers, resolveDesktopRestoreTarget can fall through
       // to current PTY size — which is at phone dims (wrong). Prefer a fresh
       // desktop renderer measurement when one exists; otherwise use the
@@ -16121,6 +16107,20 @@ export class OrcaRuntimeService {
       return true
     }
     return false
+  }
+
+  // Why: an explicit desktop take-back supersedes every delayed driver mutation.
+  private cancelPendingDriverMutations(ptyId: string): void {
+    const pendingRestore = this.pendingRestoreTimers.get(ptyId)
+    if (pendingRestore) {
+      clearTimeout(pendingRestore.timer)
+      this.pendingRestoreTimers.delete(ptyId)
+    }
+    const pendingSoft = this.pendingSoftLeavers.get(ptyId)
+    if (pendingSoft) {
+      clearTimeout(pendingSoft.timer)
+      this.pendingSoftLeavers.delete(ptyId)
+    }
   }
 
   // Why: the shared "banner must be gone now" step for an explicit desktop
