@@ -92,15 +92,6 @@ describe('CodexRuntimeHomeService', () => {
     const debianAuth = createCodexAuthJson('debian@example.com', 'acct-debian', 'debian-token')
     const ubuntuHomePath = createManagedAuth(testState.userDataDir, 'ubuntu-account', ubuntuAuth)
     const debianHomePath = createManagedAuth(testState.userDataDir, 'debian-account', debianAuth)
-    const runtimeAuthPath = join(
-      wslHome,
-      '.local',
-      'share',
-      'orca',
-      'codex-runtime-home',
-      'home',
-      'auth.json'
-    )
     const store = createStore(
       createSettings({
         codexManagedAccounts: [
@@ -146,9 +137,9 @@ describe('CodexRuntimeHomeService', () => {
 
       expect(service.prepareForRateLimitFetch({ runtime: 'wsl', wslDistro: null })).toEqual({
         kind: 'ready',
-        codexHomePath: join(wslHome, '.local', 'share', 'orca', 'codex-runtime-home', 'home')
+        codexHomePath: ubuntuHomePath
       })
-      expect(readFileSync(runtimeAuthPath, 'utf-8')).toBe(ubuntuAuth)
+      expect(readFileSync(join(ubuntuHomePath, 'auth.json'), 'utf-8')).toBe(ubuntuAuth)
     } finally {
       if (originalPlatform) {
         Object.defineProperty(process, 'platform', originalPlatform)
@@ -227,7 +218,7 @@ describe('CodexRuntimeHomeService', () => {
     }
   })
 
-  it('reads WSL system-default token refreshes back to WSL system auth', async () => {
+  it('keeps WSL system-default token refreshes in its direct home', async () => {
     const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const wslHome = join(testState.userDataDir, 'wsl-home')
@@ -256,21 +247,11 @@ describe('CodexRuntimeHomeService', () => {
       const { CodexRuntimeHomeService } = await import('./runtime-home-service')
       const service = new CodexRuntimeHomeService(store as never)
       const target = { runtime: 'wsl' as const, wslDistro: 'Ubuntu' }
-      const wslRuntimeHomePath = join(
-        wslHome,
-        '.local',
-        'share',
-        'orca',
-        'codex-runtime-home',
-        'home'
-      )
+      expect(service.prepareForCodexLaunch(target)).toBe(systemCodexHomePath)
+      writeFileSync(join(systemCodexHomePath, 'auth.json'), refreshedAuth, 'utf-8')
 
-      expect(service.prepareForCodexLaunch(target)).toBe(wslRuntimeHomePath)
-      writeFileSync(join(wslRuntimeHomePath, 'auth.json'), refreshedAuth, 'utf-8')
-
-      expect(service.prepareForCodexLaunch(target)).toBe(wslRuntimeHomePath)
+      expect(service.prepareForCodexLaunch(target)).toBe(systemCodexHomePath)
       expect(readFileSync(join(systemCodexHomePath, 'auth.json'), 'utf-8')).toBe(refreshedAuth)
-      expect(readFileSync(join(wslRuntimeHomePath, 'auth.json'), 'utf-8')).toBe(refreshedAuth)
     } finally {
       if (originalPlatform) {
         Object.defineProperty(process, 'platform', originalPlatform)
@@ -278,7 +259,7 @@ describe('CodexRuntimeHomeService', () => {
     }
   })
 
-  it('preserves WSL system-default token refreshes after app restart', async () => {
+  it('does not overwrite direct WSL system auth from the retired runtime on restart', async () => {
     const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
     const wslHome = join(testState.userDataDir, 'wsl-home')
@@ -318,8 +299,8 @@ describe('CodexRuntimeHomeService', () => {
       const service = new CodexRuntimeHomeService(store as never)
       const target = { runtime: 'wsl' as const, wslDistro: 'Ubuntu' }
 
-      expect(service.prepareForCodexLaunch(target)).toBe(wslRuntimeHomePath)
-      expect(readFileSync(join(systemCodexHomePath, 'auth.json'), 'utf-8')).toBe(refreshedAuth)
+      expect(service.prepareForCodexLaunch(target)).toBe(systemCodexHomePath)
+      expect(readFileSync(join(systemCodexHomePath, 'auth.json'), 'utf-8')).toBe(systemAuth)
       expect(readFileSync(join(wslRuntimeHomePath, 'auth.json'), 'utf-8')).toBe(refreshedAuth)
     } finally {
       if (originalPlatform) {
