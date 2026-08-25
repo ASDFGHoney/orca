@@ -191,3 +191,33 @@ describe('the state separator does not fire on ordinary titles', () => {
     expect(detectAgentStatusFromTitle(title)).toBeNull()
   })
 })
+
+describe('one real OMP turn', () => {
+  // Why: the reported symptom was ~12 committed store patches per second on a working OMP tab.
+  // This drives a full turn of the frames Orca's injected extension actually emits and counts
+  // what survives the churn gate. Before the fix each frame alternated "⠋ Pi"/"⠋ OMP" and every
+  // one of them committed.
+  it('commits twice across 30 working frames plus the idle transition', () => {
+    const frames = Array.from(
+      { length: 30 },
+      (_, index) => `${FRAMES[index % FRAMES.length]} π - fixing the sidebar - orca`
+    )
+    frames.push('π - fixing the sidebar - orca')
+
+    const committed: string[] = []
+    let previous: string | null = null
+    for (const frame of frames) {
+      const normalized = normalizeTerminalTitle(frame)
+      if (previous !== null && isDecorativeAgentTitleFrameChange(previous, normalized)) {
+        continue
+      }
+      if (normalized === previous) {
+        continue
+      }
+      committed.push(normalized)
+      previous = normalized
+    }
+
+    expect(committed).toEqual(['⠋ π - fixing the sidebar - orca', 'π - fixing the sidebar - orca'])
+  })
+})
