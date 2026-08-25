@@ -585,6 +585,60 @@ describe('ClaudeStructuredSessionAdapter prompts', () => {
     })
   })
 
+  it('keeps duplicate AskUserQuestion labels addressable independently', async () => {
+    const claude = fakeClaude()
+    const adapter = await acquired(claude)
+    claude.connections[0].handlers.onControlRequest?.({
+      type: 'control_request',
+      request_id: 'question-duplicate',
+      request: {
+        subtype: 'can_use_tool',
+        tool_name: 'AskUserQuestion',
+        tool_use_id: 'tool-question-duplicate',
+        input: {
+          questions: [
+            { question: 'Environment?', options: [{ label: 'Local' }] },
+            { question: 'Environment?', options: [{ label: 'Remote' }] }
+          ]
+        }
+      }
+    })
+    adapter.bindPromptItemId(
+      'session-1',
+      'journal-duplicate-1',
+      'question-duplicate',
+      'Environment?'
+    )
+    adapter.bindPromptItemId(
+      'session-1',
+      'journal-duplicate-2',
+      'question-duplicate',
+      'Environment?#2'
+    )
+
+    await adapter.answerPrompt({
+      sessionId: 'session-1',
+      itemId: 'journal-duplicate-1',
+      kind: 'question',
+      optionId: encodeClaudeQuestionOptionId('q1', 'choice-1'),
+      fence: 7
+    })
+    await adapter.answerPrompt({
+      sessionId: 'session-1',
+      itemId: 'journal-duplicate-2',
+      kind: 'question',
+      optionId: encodeClaudeQuestionOptionId('q2', 'choice-1'),
+      fence: 7
+    })
+
+    expect(claude.connections[0].replies[0]).toMatchObject({
+      requestId: 'question-duplicate',
+      response: {
+        updatedInput: { answers: { 'Environment?': 'Local', 'Environment?#2': 'Remote' } }
+      }
+    })
+  })
+
   it('persists the last observed leaf before graceful close', async () => {
     const claude = fakeClaude()
     const events: ClaudeStructuredSessionEvent[] = []

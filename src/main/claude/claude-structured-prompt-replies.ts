@@ -45,7 +45,7 @@ function questionAnswer(prompt: ClaudePendingPrompt, questionId: string, optionI
     return optionId
   }
   const questionIndex = prompt.questionIds.indexOf(questionId)
-  if (questionIndex < 0) {
+  if (questionIndex === -1) {
     return optionId
   }
   const choice = /^choice-([1-9]\d*)$/.exec(decoded.answer)
@@ -70,6 +70,20 @@ function questionAnswer(prompt: ClaudePendingPrompt, questionId: string, optionI
 
 function questionId(question: Record<string, unknown>, index: number): string {
   return readString(question.question) ?? readString(question.header) ?? `question-${index + 1}`
+}
+
+function uniqueQuestionIds(questions: Record<string, unknown>[]): string[] {
+  const used = new Set<string>()
+  return questions.map((question, index) => {
+    const base = questionId(question, index)
+    let id = base
+    let suffix = 2
+    while (used.has(id)) {
+      id = `${base}#${suffix++}`
+    }
+    used.add(id)
+    return id
+  })
 }
 
 export function encodeClaudeQuestionOptionId(questionId: string, answer: string): string {
@@ -118,7 +132,7 @@ export class ClaudePromptRegistry {
       suggestions: Array.isArray(control.request.permission_suggestions)
         ? control.request.permission_suggestions
         : [],
-      questionIds: questions.map(questionId),
+      questionIds: uniqueQuestionIds(questions),
       answers: new Map(),
       request: control.request
     }
