@@ -166,7 +166,6 @@ async function runStagedDeletion(
       writeSkillDeleteJournal(input.stateDirectory, journal('staging', movedCount))
   })
   if (staging.status !== 'staged') {
-    await rm(skillDeleteJournalPath(input.stateDirectory, lockKeyPath), { force: true })
     return staging.status === 'partial'
       ? {
           id: entry.id,
@@ -175,22 +174,38 @@ async function runStagedDeletion(
           removedPaths: [],
           stagedPaths: staging.stagedPaths
         }
-      : { id: entry.id, name: entry.name, status: 'failed', removedPaths: [] }
+      : await failedStagingResult(input.stateDirectory, lockKeyPath, entry)
   }
 
   await writeSkillDeleteJournal(input.stateDirectory, journal('staged', moves.length))
   const removal = await removeStagedSkillDeleteMoves(moves, input.filesystem)
-  await removeSkillInstallReceipt(input.stateDirectory, lockKeyPath).catch(() => undefined)
-  await rm(skillDeleteJournalPath(input.stateDirectory, lockKeyPath), { force: true })
+  let receiptRemoved = true
+  try {
+    await removeSkillInstallReceipt(input.stateDirectory, lockKeyPath)
+  } catch {
+    receiptRemoved = false
+  }
+  if (removal.unremoved.length === 0 && receiptRemoved) {
+    await rm(skillDeleteJournalPath(input.stateDirectory, lockKeyPath), { force: true })
+  }
   return {
     id: entry.id,
     name: entry.name,
     // Staging fully succeeded, so the skill is gone from every discovered
     // location — but an unremoved staged path still occupies disk.
-    status: removal.unremoved.length > 0 ? 'partial' : 'deleted',
+    status: removal.unremoved.length > 0 || !receiptRemoved ? 'partial' : 'deleted',
     removedPaths: sourcePathsFor(moves, removal.removedPaths),
     ...(removal.unremoved.length > 0 ? { stagedPaths: removal.unremoved } : {})
   }
+}
+
+async function failedStagingResult(
+  stateDirectory: string,
+  lockKeyPath: string,
+  entry: SkillDeletePlanEntry
+): Promise<SkillDeleteResultEntry> {
+  await rm(skillDeleteJournalPath(stateDirectory, lockKeyPath), { force: true })
+  return { id: entry.id, name: entry.name, status: 'failed', removedPaths: [] }
 }
 
 function sourcePathsFor(

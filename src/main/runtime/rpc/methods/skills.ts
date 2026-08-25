@@ -1,6 +1,6 @@
-import { app } from 'electron'
 import { defineMethod, type RpcMethod } from '../core'
 import { z } from 'zod'
+import { getAppEnvironment } from '../../../../shared/app-environment'
 import { SkillDeleteRequestSchema } from '../../../../shared/skill-delete-contract'
 import {
   previewSkillDeleteRequest,
@@ -55,7 +55,7 @@ function skillDeleteDependencies(
   return {
     repos: () => runtime.listRepos(),
     resolveProviderRootOverrides: (target) => runtime.resolveSkillDiscoveryProviderRoots(target),
-    userDataPath: app.getPath('userData')
+    userDataPath: getAppEnvironment().getPath('userData')
   }
 }
 

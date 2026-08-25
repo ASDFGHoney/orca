@@ -61,7 +61,7 @@ describe('native walker', () => {
 
 describe('WSL guest scan', () => {
   it('prunes the same staging shapes the native walker skips', () => {
-    // The command is base64-wrapped, so assert on the decoded script.
+    // The runner receives the script directly, so assert on its find expression.
     const command = buildWslSkillDiscoveryCommand([
       {
         id: 'home-agents',
@@ -72,11 +72,8 @@ describe('WSL guest scan', () => {
         owner: null
       }
     ])
-    const encoded = command.match(/printf %s '([^']+)'/)?.[1]
-    expect(encoded).toBeTruthy()
-    const script = Buffer.from(encoded ?? '', 'base64').toString('utf8')
-    expect(script).toContain(`-name '${SKILL_STAGING_GLOB}' -prune`)
+    expect(command).toContain(`-name '${SKILL_STAGING_GLOB}' -prune`)
     // The prune must gate the print, not sit beside it.
-    expect(script).toContain("-prune \\) -o \\( -type f -name 'SKILL.md' -print0 \\)")
+    expect(command).toContain("-prune \\) -o \\( -type f -name 'SKILL.md' -print0 \\)")
   })
 })

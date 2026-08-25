@@ -10,7 +10,11 @@ import {
   nativeSkillInstallFilesystem,
   type SkillInstallFilesystem
 } from './skill-install-filesystem'
-import { skillInstallStateKey, writeSkillStateFile } from './skill-install-provenance'
+import {
+  removeSkillInstallReceipt,
+  skillInstallStateKey,
+  writeSkillStateFile
+} from './skill-install-provenance'
 import { isSkillDeleteStagedName } from './skill-staging-names'
 
 const JOURNAL_MAX_BYTES = 4 * 1024 * 1024
@@ -154,6 +158,9 @@ export async function recoverSkillDeleteTransaction(
     for (const move of staged) {
       await filesystem.remove(move.stagedPath)
     }
+    // A receipt cleanup failure leaves the journal in place so startup can
+    // retry it alongside the already-idempotent staged removals.
+    await removeSkillInstallReceipt(stateDirectory, canonicalPath)
   } else {
     // Roll back in reverse of staging order, so a restored alias never points at
     // a canonical directory that does not exist yet. Indexed rather than

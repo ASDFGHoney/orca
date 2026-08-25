@@ -1,18 +1,18 @@
 import { app } from 'electron'
-import type { Store } from '../persistence'
-import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import type { Store } from '../../persistence'
+import type { OrcaRuntimeService } from '../../runtime/orca-runtime'
 import {
   SkillDeleteRequestSchema,
   type SkillDeletePlan,
   type SkillDeleteResult
-} from '../../shared/skill-delete-contract'
-import { SkillDiscoveryTargetSchema } from '../../shared/skills'
+} from '../../../shared/skill-delete-contract'
+import { SkillDiscoveryTargetSchema } from '../../../shared/skills'
 import {
   previewSkillDeleteRequest,
   runSkillDeleteRequest,
   type SkillDeleteRequestDependencies
-} from '../skills/skill-delete-request-service'
-import { resolveSkillDiscoveryTarget } from '../skills/skill-discovery-target'
+} from '../../skills/skill-delete-request-service'
+import { resolveSkillDiscoveryTarget } from '../../skills/skill-discovery-target'
 import { handleMainWindowSkillIpc } from '../skill-ipc-main-window'
 
 /**
