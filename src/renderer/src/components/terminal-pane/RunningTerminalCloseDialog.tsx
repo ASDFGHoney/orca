@@ -27,6 +27,7 @@ export default function RunningTerminalCloseDialog(): React.JSX.Element {
       open={request !== null && pinnedRequest === null}
       copyKind={request?.copyKind ?? 'command'}
       {...(request?.tabLabel ? { tabLabel: request.tabLabel } : {})}
+      {...(request?.busyTabLabels ? { busyTabLabels: request.busyTabLabels } : {})}
       // Why: a queued request swaps tabs in the already-open dialog, so the reopen reset
       // never runs; naming the subject is what clears the previous tab's opt-out tick.
       {...(request ? { subjectKey: request.terminalTabId } : {})}

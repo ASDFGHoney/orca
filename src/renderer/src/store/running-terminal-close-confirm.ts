@@ -4,8 +4,12 @@ import type { CloseTerminalDialogCopyKind } from '@/components/terminal-pane/Clo
 /** A pending confirmation for closing a terminal tab whose shell still has a
  *  running child process. `onConfirm` performs the original close. */
 export type RunningTerminalCloseConfirmRequest = {
+  /** Also the queue dedupe key, so a bulk close passes a synthetic id covering its set. */
   terminalTabId: string
   tabLabel: string
+  /** Present when one prompt covers a bulk close; names every tab that reported a live
+   *  child so the counted copy can list them. */
+  busyTabLabels?: readonly string[]
   copyKind: CloseTerminalDialogCopyKind
   onConfirm: () => void
   onCancel?: () => void
