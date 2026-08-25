@@ -10,6 +10,7 @@ export function collectPaneRenderingDiagnostics(
     gpuRenderingEnabled: pane.gpuRenderingEnabled,
     webglAttachmentDeferred: pane.webglAttachmentDeferred,
     webglDisabledAfterContextLoss: pane.webglDisabledAfterContextLoss,
+    webglContextLossesInWindow: pane.webglContextLossTimestamps?.length ?? 0,
     webglAttachFailedSinceRecovery: pane.webglAttachFailedSinceRecovery === true,
     hasComplexScriptOutput: pane.hasComplexScriptOutput,
     terminalWebglAutoDecision: getTerminalWebglAutoDecision(),

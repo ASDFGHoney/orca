@@ -10,7 +10,11 @@ import {
   presentPaneViewport,
   resetWebglTextureAtlas
 } from './pane-webgl-renderer'
-import { rebuildAttachedWebgl, reattachWebglIfNeeded } from './pane-webgl-reattach'
+import {
+  clearPaneWebglContextLossForRetry,
+  rebuildAttachedWebgl,
+  reattachWebglIfNeeded
+} from './pane-webgl-reattach'
 import {
   releaseHiddenWebglRetention,
   tryRetainHiddenPanesWebgl
@@ -85,7 +89,7 @@ export function resumePaneRendering(
     clearTerminalWebglAttachBackoff(pane)
     const rebuildDeferred = pane.webglRebuildDeferred === true
     pane.webglAttachmentDeferred = false
-    pane.webglDisabledAfterContextLoss = false
+    clearPaneWebglContextLossForRetry(pane)
     pane.webglRebuildDeferred = false
     if (pane.webglAddon && isPaneWebglContextLost(pane)) {
       disposeWebgl(pane)

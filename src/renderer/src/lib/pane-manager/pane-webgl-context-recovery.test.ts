@@ -168,6 +168,27 @@ describe('terminal WebGL context recovery', () => {
     expect(pane.webglAddon).toBeNull()
   })
 
+  it('stops reveal and resume retries after repeated losses in the retry window', () => {
+    const pane = createPane()
+
+    attachWebgl(pane)
+    fireContextLoss(pane)
+    resumePaneRendering([pane])
+    fireContextLoss(pane)
+    resumePaneRendering([pane])
+    fireContextLoss(pane)
+
+    expect(pane.webglContextLossTimestamps).toHaveLength(3)
+    expect(pane.webglDisabledAfterContextLoss).toBe(true)
+    expect(pane.webglAddon).toBeNull()
+
+    resumePaneRendering([pane])
+
+    expect(pane.webglDisabledAfterContextLoss).toBe(true)
+    expect(pane.webglAddon).toBeNull()
+    expect(pane.terminal.loadAddon).toHaveBeenCalledTimes(3)
+  })
+
   // Why exact keys: a GPU death loses every pane's context at once and the
   // crash ring coalesces the repeats, so the population has to survive on the
   // payload. It must use the same names the fit-retry crumb uses, or one ring
@@ -186,7 +207,12 @@ describe('terminal WebGL context recovery', () => {
     expect(recorded).toEqual([
       {
         kind: 'webgl-context-loss',
-        detail: { paneId: 1, livePanes: expect.any(Number), livePaneManagers: expect.any(Number) }
+        detail: {
+          paneId: 1,
+          lossesInWindow: 1,
+          livePanes: expect.any(Number),
+          livePaneManagers: expect.any(Number)
+        }
       }
     ])
   })

@@ -235,5 +235,17 @@ describe('schedulePaneRevealRepaint', () => {
       expect(pane.webglAddon).not.toBeNull()
       expect(pane.terminal.refresh).toHaveBeenCalled()
     })
+
+    it('reattaches a pane that lost WebGL while hidden when its tab is revealed', () => {
+      const pane = createPane()
+      pane.webglDisabledAfterContextLoss = true
+
+      schedulePaneRevealPresent(() => [pane])
+      flushFrame()
+      flushFrame()
+
+      expect(pane.webglDisabledAfterContextLoss).toBe(false)
+      expect(pane.webglAddon).not.toBeNull()
+    })
   })
 })
