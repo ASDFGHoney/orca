@@ -1,5 +1,4 @@
 import { detectAgentStatusFromTitle, MAX_OSC_TITLE_CHARS } from './agent-detection'
-import { collapseCompatibleAgentTitleIdentity } from './agent-title-owner'
 
 export const DECORATIVE_AGENT_TITLE_SIGNATURE_SOURCE_SCAN_LIMIT = MAX_OSC_TITLE_CHARS
 
@@ -14,11 +13,8 @@ export function getDecorativeAgentTitleSignature(title: string): string | null {
     return null
   }
   // Why: agent spinners can emit OSC title frames many times per second; the
-  // spinner glyph is live decoration, not meaningful tab or sort state. So is
-  // which member of an identity group a frame names — a wrapped harness (OMP
-  // wraps Pi) alternates them at spinner rate, and a literal signature would
-  // classify every alternation as real and commit it.
-  return `${status}:${normalizeDecorativeAgentTitleText(collapseCompatibleAgentTitleIdentity(title))}`
+  // spinner glyph is live decoration, not meaningful tab or sort state.
+  return `${status}:${normalizeDecorativeAgentTitleText(title)}`
 }
 
 export function isDecorativeAgentTitleFrameChange(prevTitle: string, nextTitle: string): boolean {

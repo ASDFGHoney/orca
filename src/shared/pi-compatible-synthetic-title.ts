@@ -5,6 +5,10 @@ const PI_COMPATIBLE_SYNTHETIC_TITLE_RE =
   /^\s*(?:[\u2800-\u28ff]\s+)?(pi|omp)(?:\s+-\s+action required|\s+(?:ready|idle|done))?\s*$/i
 // Why: legacy Pi/OMP-compatible shells can emit the delimiter before cwd text exists.
 const LEGACY_PI_COMPATIBLE_TITLE_RE = /^\s*(?:[\u2800-\u28ff]\s+)?π(?:\s*[-:]|\s)\s*.*$/u
+// Why: the state separator sits directly after the brand — `π ! label`, `OMP > label`. The brand
+// may already have been swapped for the owner's label, so accept either form. The separator must
+// be delimited (`:` attached, or spaced) or a project named `omp-harness` reads as a state.
+const PI_COMPATIBLE_SEPARATOR_RE = /^\s*(?:π|pi|omp)(?::|\s+([!>-]))(?=\s|$)/iu
 
 function containsBrailleSpinner(title: string): boolean {
   for (const char of title) {
@@ -52,4 +56,27 @@ export function getPiCompatibleSyntheticAgentStatus(
 
 export function isLegacyPiCompatibleTitle(title: string): boolean {
   return LEGACY_PI_COMPATIBLE_TITLE_RE.test(title)
+}
+
+/**
+ * Reads the run state a π-branded title encodes in its separator.
+ *
+ * Why: Pi/OMP put the state between the brand and the session label —
+ * `π ! <label>` means the agent is blocked on the user, `π > <label>` is the
+ * user's turn, `π ⠋ <label>` is working (upstream `buildTerminalTitleWithState`).
+ * Without this the `!` is never read and a blocked agent classifies as idle.
+ */
+export function getPiCompatibleTitleSeparatorStatus(
+  title: string
+): PiCompatibleSyntheticAgentStatus | null {
+  // Why: a spinner anywhere means the agent is working, and that outranks the separator —
+  // the frame is drawn over the idle separator position while a turn runs.
+  if (containsBrailleSpinner(title)) {
+    return null
+  }
+  const match = PI_COMPATIBLE_SEPARATOR_RE.exec(title)
+  if (!match) {
+    return null
+  }
+  return match[1] === '!' ? 'permission' : 'idle'
 }

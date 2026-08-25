@@ -5,11 +5,11 @@ import {
   SYNTHETIC_AGENT_TITLE_PROFILES,
   type SyntheticAgentTitleProfile
 } from './synthetic-agent-title'
-import {
-  getPiCompatibleSyntheticAgentLabel,
-  isLegacyPiCompatibleTitle
-} from './pi-compatible-synthetic-title'
+import { isLegacyPiCompatibleTitle } from './pi-compatible-synthetic-title'
 import { getWrapperTitleSegments } from './terminal-title-wrapper-segments'
+
+/** The π brand a Pi/OMP title leads with; the owner's label replaces it in place. */
+const LEGACY_PI_BRAND = 'π'
 
 type TitleProfileMatch = {
   profile: SyntheticAgentTitleProfile
@@ -67,33 +67,6 @@ function getProfileForTitle(title: string): TitleProfileMatch | null {
  */
 export function hasCompatibleAgentTitleIdentity(title: string): boolean {
   return Boolean(getProfileForTitle(title)?.profile.titleIdentityGroup)
-}
-
-/**
- * Replaces a bare agent-identity frame with its identity-group name, leaving any wrapper prefix
- * intact ("zsh | ⠋ Pi" and "zsh | ⠙ OMP" both become "zsh | pi-compatible").
- *
- * Why: members of a group are the same agent to a pane — OMP wraps Pi and both harnesses emit
- * frames — so which one a frame names is decoration, not state. Callers comparing consecutive
- * frames need those to compare equal; callers rendering the title must not use this.
- *
- * Why only bare frames: a legacy "π - <session> - <cwd>" title is also Pi-compatible, but its
- * text is real session state. Folding it would make two different sessions compare equal and
- * suppress the change outright (#16093).
- */
-export function collapseCompatibleAgentTitleIdentity(title: string): string {
-  for (const segment of getWrapperTitleSegments(title)) {
-    const label = getPiCompatibleSyntheticAgentLabel(segment)
-    const group = label
-      ? SYNTHETIC_AGENT_TITLE_PROFILES[label.toLowerCase()]?.titleIdentityGroup
-      : undefined
-    if (!group) {
-      continue
-    }
-    const at = title.lastIndexOf(segment)
-    return at === -1 ? group : title.slice(0, at) + group
-  }
-  return title
 }
 
 /**
@@ -176,6 +149,17 @@ export function normalizeCompatibleAgentTitleForOwner(
     source.profile.titleIdentityGroup !== ownerProfile.titleIdentityGroup
   ) {
     return title
+  }
+  // Why: a π-branded title is the agent's own semantic session title (`π > <session> - <cwd>`;
+  // Orca's injected extension writes the same shape). Swap only the BRAND for the owner's label
+  // so the pane still reads as its launch owner (#6689, #7633, #9077) without discarding the
+  // session name and cwd, which collapsing to a bare profile label threw away (#16093).
+  if (isLegacyPiCompatibleTitle(source.sourceTitle)) {
+    // Why scoped to the matched segment: a multiplexer prefix could itself contain the brand,
+    // and a whole-string replace would rewrite that instead of the pane's own identity.
+    const ownedSegment = source.sourceTitle.replace(LEGACY_PI_BRAND, ownerProfile.workingLabel)
+    const segmentAt = title.lastIndexOf(source.sourceTitle)
+    return segmentAt === -1 ? ownedSegment : title.slice(0, segmentAt) + ownedSegment
   }
   const sourceStatus = getSourceTitleStatus(source.sourceTitle)
   if (sourceStatus === 'working') {
