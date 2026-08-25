@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useMountedRef } from '@/hooks/useMountedRef'
+import { escalateReactUpdateDepthError } from '@/lib/react-update-depth-escalation'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import {
   isUserManagedRuntimeEnvironment,
@@ -62,6 +63,9 @@ import {
   RemoteServerUpdateStatus
 } from './RemoteServerUpdateStatus'
 import { RuntimeHostAccessForm, type RuntimeHostAccessFailure } from './RuntimeHostAccessForm'
+
+const RUNTIME_LOAD_CATCH = 'settings.RuntimeEnvironmentsPane.loadEnvironments'
+const RUNTIME_PROBE_CATCH = 'settings.RuntimeEnvironmentsPane.probeEnvironmentStatus'
 
 const LOCAL_RUNTIME_VALUE = '__local__'
 const NO_RUNTIME_VALUE = '__none__'
@@ -381,6 +385,12 @@ export function RuntimeEnvironmentsPane({
                   }
                 }))
               } catch (error) {
+                // Why first: allSettled would swallow a #185 a second time, and the probe
+                // itself succeeded — status:null here blames the host for a local render
+                // loop and marks a reachable server unverifiable.
+                if (escalateReactUpdateDepthError(error, RUNTIME_PROBE_CATCH)) {
+                  return
+                }
                 // Why: record the failed probe (null status) so the sidebar can
                 // distinguish unreachable from never-checked.
                 useAppStore.getState().setRuntimeEnvironmentStatus(environment.id, {
@@ -403,6 +413,9 @@ export function RuntimeEnvironmentsPane({
             })
         )
       } catch (error) {
+        if (escalateReactUpdateDepthError(error, RUNTIME_LOAD_CATCH)) {
+          return
+        }
         if (mountedRef.current) {
           toast.error(
             error instanceof Error

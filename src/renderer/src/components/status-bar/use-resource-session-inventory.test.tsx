@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DaemonSession } from './resource-usage-merge-types'
 import { notifyDaemonSessionInventoryInvalidated } from './daemon-session-inventory-invalidation'
 import { useResourceSessionInventory } from './use-resource-session-inventory'
+import { clearReactErrorBoundaryReportingForTest } from '@/lib/react-error-boundary-reporting'
+import {
+  flushReactUpdateDepthEscalationsForTest,
+  resetReactUpdateDepthEscalationForTest
+} from '@/lib/react-update-depth-escalation'
 
 function session(id: string): DaemonSession {
   return { id, cwd: '/workspace', title: id, agentOwnership: 'absent' as const }
@@ -82,6 +87,29 @@ describe('useResourceSessionInventory', () => {
 
     expect(result.current.sessionInventory.sessions).toEqual([session('recovered')])
     expect(result.current.sessionsError).toBe(false)
+  })
+
+  it('escalates React #185 instead of flagging the PTY host as unreachable', async () => {
+    const recordRendererError = vi.fn().mockResolvedValue({ ok: true, report: null, deduped: false })
+    resetReactUpdateDepthEscalationForTest()
+    clearReactErrorBoundaryReportingForTest()
+    ;(window as unknown as { api: { crashReports: unknown } }).api.crashReports = {
+      recordRendererError
+    }
+    listSessions.mockRejectedValue(
+      new Error('Minified React error #185; visit https://react.dev/errors/185')
+    )
+
+    const { result } = renderHook(() => useResourceSessionInventory(true))
+    await act(async () => {
+      await result.current.refreshSessions()
+    })
+    await flushReactUpdateDepthEscalationsForTest()
+
+    expect(result.current.sessionsError).toBe(false)
+    expect(recordRendererError.mock.calls[0]?.[0]?.boundaryId).toContain(
+      'use-resource-session-inventory.refreshSessions'
+    )
   })
 
   it('refreshes for background spawns without depending on mounted pane state', async () => {

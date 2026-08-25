@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { syncZoomCSSVar } from '@/lib/ui-zoom'
+import { escalateReactUpdateDepthError } from '@/lib/react-update-depth-escalation'
 import { installCodexDetachedPaneRestartExecutor } from '@/components/terminal-pane/codex-detached-pane-restart-scheduler'
 import { useAppStore } from '../store'
 import { WORKTREE_REFRESH_CONCURRENCY } from '../store/slices/worktrees'
@@ -33,6 +34,9 @@ import {
 } from '../../../shared/execution-host'
 import { mapWithConcurrency } from '../../../shared/map-with-concurrency'
 import type { OnboardingState } from '../../../shared/onboarding-state-types'
+
+const STARTUP_CATALOG_REFRESH_CATCH = 'startup-hydration.remote-catalog-refresh'
+const STARTUP_WORKTREE_REFRESH_CATCH = 'startup-hydration.deferred-worktree-refresh'
 
 async function listRuntimeSessionHostIdsForStartup(): Promise<ExecutionHostId[]> {
   try {
@@ -297,7 +301,10 @@ export function useAppStartupHydration(onOnboardingLoaded: (state: OnboardingSta
                   await actions.fetchFolderWorkspacesForAllHosts()
                 })
               } catch (err) {
-                console.warn('Remote startup catalog refresh failed:', err)
+                // A console.warn is no signal: a #185 swallowed here half-completes startup.
+                if (!escalateReactUpdateDepthError(err, STARTUP_CATALOG_REFRESH_CATCH)) {
+                  console.warn('Remote startup catalog refresh failed:', err)
+                }
               }
               if (!cancelled) {
                 try {
@@ -311,7 +318,9 @@ export function useAppStartupHydration(onOnboardingLoaded: (state: OnboardingSta
                     await actions.fetchWorktreeLineage()
                   })
                 } catch (err) {
-                  console.warn('Deferred startup worktree refresh failed:', err)
+                  if (!escalateReactUpdateDepthError(err, STARTUP_WORKTREE_REFRESH_CATCH)) {
+                    console.warn('Deferred startup worktree refresh failed:', err)
+                  }
                 }
               }
             } finally {

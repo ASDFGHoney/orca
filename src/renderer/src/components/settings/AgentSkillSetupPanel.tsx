@@ -15,8 +15,11 @@ import {
   syncSurfacesAfterAgentSkillRecheck
 } from './agent-skill-recheck-surface-sync'
 import { isOrcaCliAvailableOnPath } from '@/lib/agent-skill-cli-prerequisite'
+import { escalateReactUpdateDepthError } from '@/lib/react-update-depth-escalation'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
+
+const PRE_INSTALL_NOTICE_CATCH = 'settings.AgentSkillSetupPanel.applyPreInstallNotice'
 
 export function AgentSkillSetupPanel({
   title,
@@ -138,6 +141,28 @@ export function AgentSkillSetupPanel({
     void (shouldRecheck && recheckSurfacesAfterAgentSkillTerminal(onRecheck, freshnessSkillName))
   }, [freshnessSkillName, mountedRef, onRecheck])
 
+  // Why shared: the focus listener and the pre-terminal refresh ran the same probe with
+  // different liveness guards, so one #185 escalation now covers both callers.
+  const applyPreInstallNotice = useCallback(
+    async (isLive: () => boolean): Promise<void> => {
+      try {
+        const status = await readPrerequisiteStatus()
+        if (isLive()) {
+          setPreInstallNoticeVisible(!isPrerequisiteAvailable(status))
+        }
+      } catch (error) {
+        // Why first: openSetupTerminal awaits this too, and its catch would swallow it again.
+        if (escalateReactUpdateDepthError(error, PRE_INSTALL_NOTICE_CATCH)) {
+          return
+        }
+        if (isLive()) {
+          setPreInstallNoticeVisible(true)
+        }
+      }
+    },
+    [isPrerequisiteAvailable, readPrerequisiteStatus]
+  )
+
   useEffect(() => {
     if (!preInstallNotice) {
       setPreInstallNoticeVisible(false)
@@ -145,18 +170,7 @@ export function AgentSkillSetupPanel({
     }
 
     let canceled = false
-    const refreshCliNotice = async (): Promise<void> => {
-      try {
-        const status = await readPrerequisiteStatus()
-        if (!canceled) {
-          setPreInstallNoticeVisible(!isPrerequisiteAvailable(status))
-        }
-      } catch {
-        if (!canceled) {
-          setPreInstallNoticeVisible(true)
-        }
-      }
-    }
+    const refreshCliNotice = (): Promise<void> => applyPreInstallNotice(() => !canceled)
 
     void refreshCliNotice()
     window.addEventListener('focus', refreshCliNotice)
@@ -164,21 +178,11 @@ export function AgentSkillSetupPanel({
       canceled = true
       window.removeEventListener('focus', refreshCliNotice)
     }
-  }, [isPrerequisiteAvailable, preInstallNotice, readPrerequisiteStatus])
+  }, [applyPreInstallNotice, preInstallNotice])
 
   const refreshPreInstallNotice = async (): Promise<void> => {
-    if (!preInstallNotice) {
-      return
-    }
-    try {
-      const status = await readPrerequisiteStatus()
-      if (mountedRef.current) {
-        setPreInstallNoticeVisible(!isPrerequisiteAvailable(status))
-      }
-    } catch {
-      if (mountedRef.current) {
-        setPreInstallNoticeVisible(true)
-      }
+    if (preInstallNotice) {
+      await applyPreInstallNotice(() => mountedRef.current)
     }
   }
 

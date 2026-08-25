@@ -31,10 +31,12 @@ function messageOf(error: unknown): string {
   return ''
 }
 
+export function isReactUpdateDepthError(error: unknown): boolean {
+  return REACT_UPDATE_DEPTH_ERROR.test(messageOf(error))
+}
+
 export function getReactErrorBoundaryAttribution(
   error: unknown
 ): CrashReportAttribution | undefined {
-  return REACT_UPDATE_DEPTH_ERROR.test(messageOf(error))
-    ? UNRELIABLE_BOUNDARY_ATTRIBUTION
-    : undefined
+  return isReactUpdateDepthError(error) ? UNRELIABLE_BOUNDARY_ATTRIBUTION : undefined
 }
