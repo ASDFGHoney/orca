@@ -80,6 +80,10 @@ export type RuntimeStatus = {
   runtimeProtocolVersion?: number
   minCompatibleRuntimeClientVersion?: number
   capabilities?: RuntimeCapability[]
+  /** Optional policy for clients that negotiated worktree.create-idempotency.v1. */
+  worktreeCreateIdempotency?: {
+    dedupeTtlMs: number
+  }
   // Why: optional fields let updated clients inventory both new and legacy paired servers.
   appVersion?: string
   remoteUpdateSupport?: RemoteServerUpdateSupport
