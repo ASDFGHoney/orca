@@ -5,7 +5,10 @@ import {
   SYNTHETIC_AGENT_TITLE_PROFILES,
   type SyntheticAgentTitleProfile
 } from './synthetic-agent-title'
-import { isLegacyPiCompatibleTitle } from './pi-compatible-synthetic-title'
+import {
+  getPiCompatibleSyntheticAgentLabel,
+  isLegacyPiCompatibleTitle
+} from './pi-compatible-synthetic-title'
 import { getWrapperTitleSegments } from './terminal-title-wrapper-segments'
 
 type TitleProfileMatch = {
@@ -164,6 +167,24 @@ export function normalizeCompatibleAgentTitleForOwner(
     return ownerProfile.idleLabel
   }
   return ownerProfile.workingLabel
+}
+
+/**
+ * Relabels only a bare identity frame ("⠋ Pi", "Pi ready") to the owner's label.
+ *
+ * Why: a wrapped harness publishes the inner agent's identity (OMP wraps Pi), so those frames
+ * alternate against the owner's own and defeat decorative-frame suppression at the store. A
+ * semantic session title ("π - <session> - <cwd>") is left alone — it carries text no owner
+ * profile can reproduce, so rewriting it to a generic label would lose real information.
+ */
+export function relabelCompatibleAgentIdentityFrameForOwner(
+  title: string,
+  ownerAgentType: AgentType | null | undefined
+): string {
+  if (!getPiCompatibleSyntheticAgentLabel(title)) {
+    return title
+  }
+  return normalizeCompatibleAgentTitleForOwner(title, ownerAgentType)
 }
 
 /**
