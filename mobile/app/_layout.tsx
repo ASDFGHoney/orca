@@ -7,6 +7,7 @@ import * as Notifications from 'expo-notifications'
 import * as Linking from 'expo-linking'
 import { colors } from '../src/theme/mobile-theme'
 import { OrcaLogo } from '../src/components/OrcaLogo'
+import { MobileRootErrorBoundary } from '../src/components/MobileRootErrorBoundary'
 import { RpcClientProvider } from '../src/transport/client-context'
 import { getNotificationNavigationTarget } from '../src/notifications/notification-routing'
 import { useOpenNotificationRoute } from '../src/notifications/use-open-notification-route'
@@ -33,7 +34,7 @@ Notifications.setNotificationHandler({
   })
 })
 
-export default function RootLayout() {
+function RootLayoutContents() {
   const router = useRouter()
   const openNotificationRoute = useOpenNotificationRoute()
   const handledNotificationIdsRef = useRef<Set<string>>(new Set())
@@ -202,6 +203,23 @@ export default function RootLayout() {
         </Stack>
       </View>
     </RpcClientProvider>
+  )
+}
+
+export default function RootLayout() {
+  const router = useRouter()
+  const leaveFailedRoute = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back()
+      return
+    }
+    router.replace('/')
+  }, [router])
+
+  return (
+    <MobileRootErrorBoundary onGoBack={leaveFailedRoute}>
+      <RootLayoutContents />
+    </MobileRootErrorBoundary>
   )
 }
 
