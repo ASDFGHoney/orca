@@ -17,6 +17,7 @@ import {
 import { ProcessGoneDedupe } from './process-gone-dedupe'
 import { recordProcessGoneCrash, type ProcessGoneCrashEvent } from './process-gone-recorder'
 import { resetProcessGoneSiblingCorrelationForTest } from './process-gone-sibling-correlation'
+import { resetSuppressedProcessGoneRingBudgetForTest } from './suppressed-process-gone-ring-budget'
 
 const noMinidump = async () => null
 const attachDetails = async () => null
@@ -63,6 +64,7 @@ beforeEach(() => {
   now = 1_000
   resetExpectedTeardownStateForTest(() => now)
   clearCrashBreadcrumbsForTest()
+  resetSuppressedProcessGoneRingBudgetForTest()
   resetProcessGoneSiblingCorrelationForTest()
 })
 
@@ -70,6 +72,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   resetExpectedTeardownStateForTest()
   clearCrashBreadcrumbsForTest()
+  resetSuppressedProcessGoneRingBudgetForTest()
   resetProcessGoneSiblingCorrelationForTest()
 })
 

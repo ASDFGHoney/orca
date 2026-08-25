@@ -3,17 +3,13 @@ import { app } from 'electron'
 import {
   isCrashReportReason,
   sanitizeCrashReportDetails,
-  sanitizeCrashReportString,
-  type CrashReportBreadcrumbData
+  sanitizeCrashReportString
 } from '../../shared/crash-reporting'
 import { decodePosixWaitStatus, describePosixWaitStatus } from '../../shared/posix-wait-status'
 import { rendererCrashBreadcrumbOrigin } from '../../shared/crash-breadcrumb-origin'
 import type { CrashReportStore } from './crash-report-store'
 import { getCrashBreadcrumbSnapshot } from './crash-breadcrumb-store'
-import {
-  recordCoalescedDurableCrashBreadcrumb,
-  recordDurableCrashBreadcrumb
-} from './durable-crash-breadcrumb'
+import { recordDurableCrashBreadcrumb } from './durable-crash-breadcrumb'
 import {
   correlateChildProcessDeath,
   trackRendererSiblingAttribution
@@ -24,7 +20,10 @@ import {
   type ProcessGoneSource
 } from './process-gone-classification'
 import { buildProcessGoneCrashDetails } from './process-gone-diagnostics'
-import { buildSuppressedProcessGoneBreadcrumbData } from './suppressed-process-gone-breadcrumb'
+import {
+  buildSuppressedProcessGoneBreadcrumbData,
+  recordSuppressedProcessGone
+} from './suppressed-process-gone-breadcrumb'
 import {
   getProcessGoneDedupeKey,
   processGoneDedupe,
@@ -40,6 +39,7 @@ import {
   scheduleCrashpadDumpPrune,
   type CapturedMinidump
 } from './crashpad-capture'
+import { crashpadProcessTypeFor } from './crashpad-process-type'
 import { minidumpSignatureDetails } from './minidump-crash-signature'
 import { flushActiveSink, startSpan } from '../observability/tracer'
 
@@ -61,24 +61,12 @@ export type MinidumpCapture = (
   expectedProcessType: string
 ) => Promise<CapturedMinidump | null>
 
-const CHILD_CRASHPAD_PROCESS_TYPES: Readonly<Record<string, string>> = {
-  gpu: 'gpu-process',
-  utility: 'utility',
-  zygote: 'zygote'
-}
-
 function expectedCrashpadProcessType(event: ProcessGoneCrashEvent): string | null {
-  return event.source === 'renderer'
-    ? 'renderer'
-    : (CHILD_CRASHPAD_PROCESS_TYPES[event.processType.trim().toLowerCase()] ?? null)
+  return crashpadProcessTypeFor(event.source, event.processType)
 }
 
 const captureProcessMinidump: MinidumpCapture = (crashedAtMs, expectedProcessType) =>
   captureMinidumpSignature(crashedAtMs, { expectedProcessType })
-
-// Why: the coalesce map prunes every key against the calling window, so a shorter
-// one here would weaken the other 30s coalescers. Stay uniform with them.
-const SUPPRESSED_PROCESS_GONE_COALESCE_MS = 30_000
 
 function processGoneBreadcrumbData(event: ProcessGoneCrashEvent) {
   return buildSuppressedProcessGoneBreadcrumbData(event)
@@ -88,21 +76,6 @@ function processGoneRendererOrigin(event: ProcessGoneCrashEvent): string | undef
   return event.webContentsId === undefined
     ? undefined
     : rendererCrashBreadcrumbOrigin(event.webContentsId)
-}
-
-// Why: key off the emitted breadcrumb, not the crash-report dedupe key, so two
-// different recoverable services can never suppress each other's evidence.
-function suppressedProcessGoneCoalesceKey(data: CrashReportBreadcrumbData): string {
-  return JSON.stringify([
-    data.source,
-    data.processType,
-    data.reason,
-    data.exitCode,
-    data.expectedTeardown,
-    data.serviceName ?? null,
-    data.name ?? null,
-    data.type ?? null
-  ])
 }
 
 // Why: POSIX exit codes arrive as raw wait statuses (61696 = exit 241); name the
@@ -202,20 +175,7 @@ export function recordProcessGoneCrash(
       expectedTeardown: event.expectedTeardown
     })
   ) {
-    // Why: Chromium can crash-loop a recoverable child (network service seen at
-    // 1459/min) and each suppressed event costs a span plus a forced disk flush,
-    // which both floods the 30-entry ring and evicts the real pre-crash trail.
-    const suppressedData = processGoneBreadcrumbData(event)
-    const origin = processGoneRendererOrigin(event)
-    recordCoalescedDurableCrashBreadcrumb({
-      name: 'process_gone_suppressed',
-      data: suppressedData,
-      coalesceKey: origin
-        ? `${origin}\u0000${suppressedProcessGoneCoalesceKey(suppressedData)}`
-        : suppressedProcessGoneCoalesceKey(suppressedData),
-      minIntervalMs: SUPPRESSED_PROCESS_GONE_COALESCE_MS,
-      ...(origin ? { origin } : {})
-    })
+    recordSuppressedProcessGone(event, goneAt, processGoneRendererOrigin(event))
     return
   }
   if (!store) {

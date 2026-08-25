@@ -32,6 +32,15 @@ const MAX_STORED_DUMP_BYTES = 128 * 1024 * 1024
 const MAX_STORED_DUMPS = 64
 const DUMP_PRUNE_DELAY_MS = 2_000
 
+type SuppressedDumpBarrier = {
+  readonly processType: string
+  readonly armedAtMs: number
+}
+
+// Bounds the list across a crash loop; a barrier older than the recency window
+// can no longer match any capture anyway.
+const MAX_SUPPRESSED_DUMP_BARRIERS = 32
+
 type DumpCandidate = {
   readonly filePath: string
   readonly mtimeMs: number
@@ -46,6 +55,9 @@ let captureStarted = false
 let captureStartedAtMs: number | null = null
 const claimedDumpPaths = new Map<string, number>()
 const reservedDumpPaths = new Set<string>()
+// Suppressed crashes still leave a dump behind and never claim one, so each is
+// fenced off here for the next same-type capture to consume instead of adopt.
+let suppressedDumpBarriers: SuppressedDumpBarrier[] = []
 let dumpPruneTimer: NodeJS.Timeout | null = null
 
 export type CrashpadCaptureOptions = {
@@ -110,6 +122,7 @@ export function _setCrashpadCaptureStateForTest(
   captureStartedAtMs = state?.started ? (state.startedAtMs ?? Number.NEGATIVE_INFINITY) : null
   claimedDumpPaths.clear()
   reservedDumpPaths.clear()
+  suppressedDumpBarriers = []
   if (dumpPruneTimer) {
     clearTimeout(dumpPruneTimer)
     dumpPruneTimer = null
@@ -269,6 +282,45 @@ export async function waitForCrashMinidump(
   return pollDumpCandidates(crashedAtMs, options, async (candidate) => candidate)
 }
 
+/**
+ * Records that a crash we deliberately did not report may have left a dump.
+ *
+ * Why: the dump is on disk with nothing pointing at it, and the next reportable
+ * crash of the same process type polls for "a recent dump of my type" — it would
+ * otherwise attach the suppressed service's CHECK file, line and stack to an
+ * unrelated report, sending a triager after the wrong crash.
+ */
+export function noteSuppressedCrashDump(processType: string, crashedAtMs: number): void {
+  suppressedDumpBarriers.push({ processType, armedAtMs: crashedAtMs })
+  if (suppressedDumpBarriers.length > MAX_SUPPRESSED_DUMP_BARRIERS) {
+    suppressedDumpBarriers.shift()
+  }
+}
+
+/** One barrier absorbs one dump: consume it so a genuine later crash of the
+ *  same type still pairs with the dump Crashpad writes for it. */
+function consumeSuppressedDumpBarrier(
+  dump: DumpCandidate,
+  processType: string | undefined,
+  crashedAtMs: number
+): boolean {
+  if (processType === undefined) {
+    return false
+  }
+  const index = suppressedDumpBarriers.findIndex(
+    (barrier) =>
+      barrier.processType === processType &&
+      barrier.armedAtMs <= crashedAtMs &&
+      barrier.armedAtMs >= crashedAtMs - DUMP_RECENCY_WINDOW_MS &&
+      dump.mtimeMs >= barrier.armedAtMs
+  )
+  if (index === -1) {
+    return false
+  }
+  suppressedDumpBarriers.splice(index, 1)
+  return true
+}
+
 export type CapturedMinidump = {
   readonly filePath: string
   readonly sizeBytes: number
@@ -300,6 +352,11 @@ export async function captureMinidumpSignature(
           (options.expectedProcessType !== undefined &&
             signature.processType !== options.expectedProcessType)
         ) {
+          rejectedDumpPaths.add(dump.filePath)
+          return null
+        }
+        if (consumeSuppressedDumpBarrier(dump, options.expectedProcessType, crashedAtMs)) {
+          // Deliberately not claimed: a suppressed crash's dump stays prunable.
           rejectedDumpPaths.add(dump.filePath)
           return null
         }

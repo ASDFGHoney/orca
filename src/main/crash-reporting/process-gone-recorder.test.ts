@@ -20,6 +20,7 @@ import { ProcessGoneDedupe } from './process-gone-dedupe'
 import { recordProcessGoneCrash, type ProcessGoneCrashEvent } from './process-gone-recorder'
 import { resetProcessGoneSiblingCorrelationForTest } from './process-gone-sibling-correlation'
 import { _resetTracerForTests, setActiveSink, type TracerSink } from '../observability/tracer'
+import { resetSuppressedProcessGoneRingBudgetForTest } from './suppressed-process-gone-ring-budget'
 
 type CapturingSink = TracerSink & { records: unknown[]; flushMock: ReturnType<typeof vi.fn> }
 
@@ -57,6 +58,7 @@ beforeEach(() => {
   sink = capturingSink()
   setActiveSink(sink)
   clearCrashBreadcrumbsForTest()
+  resetSuppressedProcessGoneRingBudgetForTest()
   resetProcessGoneSiblingCorrelationForTest()
 })
 
@@ -65,6 +67,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   _resetTracerForTests()
   clearCrashBreadcrumbsForTest()
+  resetSuppressedProcessGoneRingBudgetForTest()
   resetProcessGoneSiblingCorrelationForTest()
 })
 
@@ -595,7 +598,7 @@ describe('minidump signature attachment', () => {
       event({
         source: 'child',
         processType: 'Utility',
-        // A utility outside the recoverable-service allowlist still reports.
+        // A utility Chromium churn does not own still reports.
         details: { type: 'Utility', serviceName: 'storage.mojom.StorageService' }
       }),
       new ProcessGoneDedupe(),
