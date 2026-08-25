@@ -14,9 +14,10 @@
  *   "Pi"  — `normalizeTerminalTitle` collapsing our own extension's output to a hardcoded
  *           literal, discarding the session name and cwd along with it (#16093).
  *
- * The fix removes both: the agent owns its OSC title (`synthesizeTerminalTitle: false`,
- * the OpenCode precedent), and the normalizer canonicalizes only the rotating braille frame
- * so consecutive frames dedupe while the label survives.
+ * The fix removes both: the agent owns the title it animates (`synthesizeWorkingTitle: false`
+ * — not the stronger `synthesizeTerminalTitle: false`, because terminal-state frames still
+ * carry the pane's agent identity downstream), and the normalizer canonicalizes only the
+ * rotating braille frame so consecutive frames dedupe while the label survives.
  */
 import { describe, expect, it } from 'vitest'
 import { detectAgentStatusFromTitle, normalizeTerminalTitle } from './agent-title-status'
