@@ -33149,9 +33149,23 @@ export class OrcaRuntimeService {
   private resolvePaneAgentIdentityField(
     launchAgent: TuiAgent | null | undefined,
     foregroundAgent: TuiAgent | null | undefined,
-    title: string | null
+    title: string | null,
+    paneKey: string | null
   ): { agentIdentity?: TuiAgent } {
-    const agentIdentity = resolvePublishedPaneAgentIdentity({ launchAgent, foregroundAgent, title })
+    // Why hooks here: an agent the USER started from a shell has no launch record, and on WSL the
+    // Windows host reads its foreground process as `wsl.exe` rather than the agent inside the
+    // distro. The hook is the only signal that survives both, because the agent reports itself.
+    const hookRow = paneKey
+      ? this.getHookAgentRowForPane(this.getAgentProviderSessionRowsForPaneFn?.(paneKey) ?? [])
+      : null
+    const hookAgent = isTuiAgent(hookRow?.agentType) ? hookRow.agentType : null
+    const agentIdentity = resolvePublishedPaneAgentIdentity({
+      hookAgent,
+      hookIsLive: hookRow?.live != null,
+      launchAgent,
+      foregroundAgent,
+      title
+    })
     return agentIdentity ? { agentIdentity } : {}
   }
 
@@ -33197,7 +33211,12 @@ export class OrcaRuntimeService {
       preview: leaf.preview,
       ...(leaf.lastExitCause ? { exitCause: leaf.lastExitCause } : {}),
       ...this.terminalExecutionHostField(leaf.ptyId, leaf.worktreeId),
-      ...this.resolvePaneAgentIdentityField(pty?.launchAgent, pty?.foregroundAgent, title)
+      ...this.resolvePaneAgentIdentityField(
+        pty?.launchAgent,
+        pty?.foregroundAgent,
+        title,
+        makePaneKey(leaf.tabId, leaf.leafId)
+      )
     }
   }
 
@@ -35178,7 +35197,12 @@ export class OrcaRuntimeService {
       preview: pty.preview,
       ...(pty.lastExitCause ? { exitCause: pty.lastExitCause } : {}),
       ...this.terminalExecutionHostField(pty.ptyId, pty.worktreeId),
-      ...this.resolvePaneAgentIdentityField(pty.launchAgent, pty.foregroundAgent, title)
+      ...this.resolvePaneAgentIdentityField(
+        pty.launchAgent,
+        pty.foregroundAgent,
+        title,
+        pty.paneKey ?? null
+      )
     }
   }
 

@@ -53,4 +53,42 @@ describe('resolvePublishedPaneAgentIdentity', () => {
   it('publishes nothing for a hyphenated worktree name that contains an agent word', () => {
     expect(resolve({ title: 'review-14600-codex' })).toBeUndefined()
   })
+
+  describe('identity must not depend on how the agent was started', () => {
+    // Most agents are started by typing `claude` / `codex` at a shell, not through Orca's agent
+    // launcher. Those panes have no launch record at all, so anything that leans on one works for
+    // roughly half of real usage.
+    it('identifies a shell-started agent from its own hook report', () => {
+      expect(resolve({ hookAgent: 'codex', hookIsLive: true })).toBe('codex')
+    })
+
+    it('identifies a shell-started agent on WSL, where the process signal is useless', () => {
+      // The Windows host reads the foreground process of a WSL pane as `wsl.exe`, not the agent
+      // running inside the distro — so `foregroundAgent` cannot name it and there is no launch
+      // record. Without hook evidence this pane is unaddressable.
+      expect(resolve({ hookAgent: 'codex', hookIsLive: false })).toBe('codex')
+    })
+
+    it('still resolves when only a launch record exists', () => {
+      expect(resolve({ launchAgent: 'claude' })).toBe('claude')
+    })
+  })
+
+  describe('a launch record is a past event, not a live observation', () => {
+    // Field report: launch an agent, close it, reuse the terminal — the pane kept reading as the
+    // old agent. A launch record does not stop being true when the thing it describes ends.
+    it('lets a completed hook outrank a stale launch record', () => {
+      expect(resolve({ launchAgent: 'claude', hookAgent: 'codex', hookIsLive: false })).toBe(
+        'codex'
+      )
+    })
+
+    it('lets a live hook outrank a stale launch record', () => {
+      expect(resolve({ launchAgent: 'claude', hookAgent: 'codex', hookIsLive: true })).toBe('codex')
+    })
+
+    it('lets the live foreground process outrank a stale launch record', () => {
+      expect(resolve({ launchAgent: 'claude', foregroundAgent: 'codex' })).toBe('codex')
+    })
+  })
 })

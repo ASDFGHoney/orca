@@ -8,6 +8,9 @@ import type { TuiAgent } from './tui-agent'
  * Kept out of the runtime class so it can be tested without one, and so routing, delivery and the
  * UI all read the same decision instead of each re-deriving it.
  *
+ * Hook evidence ranks first because the agent reports its own identity regardless of how it was
+ * started — Orca's launcher, a shell prompt, or a resumed session — and regardless of host.
+ *
  * Title is NOT consulted. What this publishes authorizes actions, and a terminal title is a
  * decoration channel a user can type any agent's name into — "Switch Claude and Codex off the
  * load balancer… - grok" is a Grok pane that used to receive both `@claude` and `@codex`.
@@ -17,6 +20,15 @@ import type { TuiAgent } from './tui-agent'
  * authorizes an action must fail closed on it rather than falling back to parsing the title.
  */
 export function resolvePublishedPaneAgentIdentity(args: {
+  /**
+   * The agent a provider hook reported for this pane. The ONLY signal that does not depend on how
+   * the agent was started: a user who types `claude` at a shell still posts hooks. It is also the
+   * only one that survives WSL, where the Windows host reads the foreground process as `wsl.exe`
+   * rather than the agent running inside the distro.
+   */
+  hookAgent?: TuiAgent | null
+  /** Whether that hook belongs to a turn in progress, as opposed to one that finished. */
+  hookIsLive?: boolean
   launchAgent?: TuiAgent | null
   foregroundAgent?: TuiAgent | null
   title?: string | null
@@ -30,6 +42,14 @@ export function resolvePublishedPaneAgentIdentity(args: {
       // parsed string publishes no identity, and every action consumer fails closed on absence.
       minimumSource: 'launch',
       evidence: [
+        ...(args.hookAgent
+          ? [
+              {
+                source: args.hookIsLive ? ('live-hook' as const) : ('completed-hook' as const),
+                agent: args.hookAgent
+              }
+            ]
+          : []),
         ...(args.foregroundAgent
           ? [{ source: 'process' as const, agent: args.foregroundAgent }]
           : []),
