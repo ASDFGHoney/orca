@@ -68,7 +68,7 @@ function createContext(overrides: Partial<ReattachPayloadContext>): ReattachPayl
     revealFollowsTerminalPark: false,
     reconnectMayUseModel: false,
     fetchSshMainModelReattachSnapshot: async () => null,
-    hasStructuralReplay: true,
+    shouldApplyStructuralPayload: true,
     coldRestoreStartup: undefined,
     reattachPayloadApplied: false,
     ...overrides
@@ -110,10 +110,29 @@ describe('reattach payload SSH reconnect model paint', () => {
     // Kitty pushes made during the outage exist only in the replay, so the replay
     // scan layers ON TOP of the snapshot baseline — inverted, the baseline wins.
     expect.soft(session.kittyKeyboardModes.scanReplay).toHaveBeenCalledWith(RELAY_TAIL)
+    expect.soft(session.pane.fitAddon.proposeDimensions).toHaveBeenCalledTimes(2)
     expect.soft(fireLog).toContain('kitty:snapshot-baseline')
     expect
       .soft(fireLog.indexOf('kitty:scan-replay'))
       .toBeGreaterThan(fireLog.indexOf('kitty:snapshot-baseline'))
+  })
+
+  it('paints the model when a reconnect has no relay tail', async () => {
+    const fireLog: FireLog = []
+    const session = createSession(fireLog)
+    const probe = vi.fn(async () => createModelSnapshot())
+    const ctx = createContext({
+      connectResult: { id: 'pty-1', isReattach: true, replay: '' },
+      reconnectMayUseModel: true,
+      fetchSshMainModelReattachSnapshot: probe
+    })
+
+    await createReattachPayloadHandlers(session, ctx).applyReattachPayload()
+
+    expect(probe).toHaveBeenCalledTimes(1)
+    expect(paintedBytes(fireLog)).toContain(MODEL_MARKER)
+    expect(session.pane.fitAddon.proposeDimensions).toHaveBeenCalledTimes(2)
+    expect(ctx.reattachPayloadApplied).toBe(true)
   })
 
   it('never spends the probe timeout when the replay shows the app left the alternate screen', async () => {
@@ -132,6 +151,7 @@ describe('reattach payload SSH reconnect model paint', () => {
     // The veto is decided before the fetch: probing first would burn
     // SSH_REATTACH_MODEL_SNAPSHOT_TIMEOUT_MS inside the coordinator only to discard it.
     expect(probe).not.toHaveBeenCalled()
+    expect(session.pane.fitAddon.proposeDimensions).not.toHaveBeenCalled()
     const painted = paintedBytes(fireLog)
     expect(painted).toContain(exitedReplay)
     expect(painted).not.toContain(MODEL_MARKER)
@@ -153,6 +173,8 @@ describe('reattach payload SSH reconnect model paint', () => {
     await createReattachPayloadHandlers(session, ctx).applyReattachPayload()
 
     expect(probe).not.toHaveBeenCalled()
+    // Park painting measures for its own width checks, but must not pay a third reconnect check.
+    expect(session.pane.fitAddon.proposeDimensions).toHaveBeenCalledTimes(2)
     const painted = paintedBytes(fireLog)
     expect(painted).toContain(PARK_MARKER)
     expect(painted).not.toContain(MODEL_MARKER)

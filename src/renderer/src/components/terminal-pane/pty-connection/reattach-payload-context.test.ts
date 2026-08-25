@@ -36,7 +36,7 @@ function createContext(replay: string, attemptGeneration: number): ReattachPaylo
     revealFollowsTerminalPark: false,
     reconnectMayUseModel: false,
     fetchSshMainModelReattachSnapshot: async () => null,
-    hasStructuralReplay: true,
+    shouldApplyStructuralPayload: true,
     coldRestoreStartup: undefined,
     reattachPayloadApplied: false
   }

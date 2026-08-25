@@ -241,6 +241,10 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
         return false
       }
     }
+    // A reconnect with no relay tail can still restore main's model. Keep that probe and paint in
+    // the structural transaction so live output cannot overtake the snapshot.
+    const shouldApplyStructuralPayload =
+      hasStructuralReplay || prefetchedParkModelSnapshot !== null || reconnectMayUseModel
     const reattachPayload: ReattachPayloadContext = {
       isCurrentReattachPayload,
       connectResult,
@@ -250,15 +254,15 @@ export function bindHandleReattachResult(sessionBag: ConnectPanePtySession): voi
       revealFollowsTerminalPark,
       reconnectMayUseModel,
       fetchSshMainModelReattachSnapshot,
-      hasStructuralReplay,
+      shouldApplyStructuralPayload,
       coldRestoreStartup,
-      reattachPayloadApplied: !hasStructuralReplay && prefetchedParkModelSnapshot === null
+      reattachPayloadApplied: !shouldApplyStructuralPayload
     }
     const { applyReattachPayload, fitAfterReattachRestore } = createReattachPayloadHandlers(
       session,
       reattachPayload
     )
-    if (hasStructuralReplay || prefetchedParkModelSnapshot) {
+    if (shouldApplyStructuralPayload) {
       await session.structuralReplayCoordinator.run(applyReattachPayload, {
         shouldRestore: isCurrentReattachPayload,
         afterRestore: fitAfterReattachRestore

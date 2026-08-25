@@ -366,6 +366,13 @@ describe('connectPanePty', () => {
     expect(transport.resize).not.toHaveBeenCalledWith(119, 40)
   })
 
+  it('paints a reconnect from the alt-screen model when the relay has no replay', async () => {
+    const { writes } = await reconnectWithAltScreenModel('')
+
+    expect(window.api.pty.getMainBufferSnapshot).toHaveBeenCalledTimes(1)
+    expect(writes.join('')).toContain('MODEL-ALT-FRAME')
+  })
+
   it('uses the SSH relay replay for a reconnect once the replay shows the app left alt screen', async () => {
     const { writes } = await reconnectWithAltScreenModel('\x1b[?1049l\r\n$ real-shell-output')
 

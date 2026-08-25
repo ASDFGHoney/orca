@@ -14,11 +14,8 @@ import {
 } from '../terminal-snapshot-replay-paint'
 
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
-import {
-  lastAlternateScreenTransition,
-  sshReconnectPaintsFromModel
-} from '../ssh-reattach-model-restore'
 import { restoredSnapshotPaintsPrintableContent } from '../restored-snapshot-coverage'
+import { resolveSshReconnectModelPaint } from './resolve-ssh-reconnect-model-paint'
 
 import type { ReattachPayloadContext } from './reattach-payload-context'
 import type { ReattachPayloadSession } from './reattach-payload-session'
@@ -109,7 +106,11 @@ export function createReattachPayloadHandlers(
           window.api.pty.ackColdRestore(ctx.ptyId)
         }
       }
-    } else if (ctx.connectResult?.replay || ctx.prefetchedParkModelSnapshot) {
+    } else if (
+      ctx.connectResult?.replay ||
+      ctx.prefetchedParkModelSnapshot ||
+      ctx.reconnectMayUseModel
+    ) {
       // Why scoped to a park-reveal: the 100KiB relay tail loses scrollback the
       // model still holds, but an in-place reattach (network reconnect, wake,
       // reload) already has that replay in hand, so probing would only delay its
@@ -123,26 +124,15 @@ export function createReattachPayloadHandlers(
         ? (ctx.prefetchedParkModelSnapshot ??
           (isRemoteRuntimePtyId(ctx.ptyId) ? null : await ctx.fetchSshMainModelReattachSnapshot()))
         : null
-      // Asked before the probe, not after: if the replay shows the app left the alternate
-      // screen, no snapshot can be used no matter what it says, so fetching one only spends the
-      // 750ms timeout to throw the answer away — and spends it inside the coordinator, with live
-      // PTY bytes deferred and the payload still able to be superseded.
-      const replayTransition = lastAlternateScreenTransition(ctx.connectResult?.replay)
-      const replayVetoesModel = replayTransition === 'exited'
-      const reconnectSnapshot =
-        !revealSnapshot && ctx.reconnectMayUseModel && !replayVetoesModel
-          ? await ctx.fetchSshMainModelReattachSnapshot()
-          : null
-      const paintsReconnectFromModel = sshReconnectPaintsFromModel({
-        snapshot: reconnectSnapshot,
-        hasReplay: Boolean(ctx.connectResult?.replay),
-        replayTransition,
-        altFrameWouldBeSkipped: shouldSkipAltFrameForWidthMismatch(
-          reconnectSnapshot?.cols,
-          readProposedTerminalCols(session.pane)
-        )
+      const reconnectPaint = await resolveSshReconnectModelPaint({
+        reconnectMayUseModel: !revealSnapshot && ctx.reconnectMayUseModel,
+        replay: ctx.connectResult?.replay,
+        fetchSnapshot: ctx.fetchSshMainModelReattachSnapshot,
+        readTargetCols: () => readProposedTerminalCols(session.pane)
       })
-      const modelSnapshot = revealSnapshot ?? (paintsReconnectFromModel ? reconnectSnapshot : null)
+      const paintsReconnectFromModel = reconnectPaint.paintsFromModel
+      const modelSnapshot =
+        revealSnapshot ?? (paintsReconnectFromModel ? reconnectPaint.snapshot : null)
       if (!ctx.isCurrentReattachPayload()) {
         return
       }
@@ -183,10 +173,9 @@ export function createReattachPayloadHandlers(
         // the ?1049h marker when splitting scrollbackAnsi) — inlined here
         // because nesting structuralReplayCoordinator would deadlock.
         for (const replayChunk of buildMainModelSnapshotReplayWrites(modelSnapshot, {
-          skipAltFrame: shouldSkipAltFrameForWidthMismatch(
-            modelCols,
-            readProposedTerminalCols(session.pane)
-          ),
+          skipAltFrame: paintsReconnectFromModel
+            ? reconnectPaint.altFrameWouldBeSkipped
+            : shouldSkipAltFrameForWidthMismatch(modelCols, readProposedTerminalCols(session.pane)),
           paneOnAlternateScreen: session.isPaneOnAlternateScreen()
         })) {
           session.writeReplayData(replayChunk)
@@ -310,7 +299,7 @@ export function createReattachPayloadHandlers(
         session.schedulePendingStartupCommandDelivery()
       }
     }
-    if (ctx.hasStructuralReplay || ctx.prefetchedParkModelSnapshot) {
+    if (ctx.shouldApplyStructuralPayload) {
       await waitForTerminalReplayWritesParsed(session.pane.terminal)
       if (!ctx.isCurrentReattachPayload()) {
         return
