@@ -1,10 +1,10 @@
 import { posix as pathPosix, win32 as pathWin32 } from 'node:path'
-import { skillDirectoryMaxDepth } from '../../shared/skill-discovery-depth'
-import type { SkillPathSemantics } from '../../shared/skill-path-containment'
-import type { SkillScanRoot } from './skill-discovery-sources'
-import type { SkillInstallFilesystem, SkillPathInspection } from './skill-install-filesystem'
-import { SKILL_FILE_NAME } from './skill-root-file-walk'
-import { isSkillStagingEntryName } from './skill-staging-names'
+import { skillDirectoryMaxDepth } from '../../../shared/skill-discovery-depth'
+import type { SkillPathSemantics } from '../../../shared/skill-path-containment'
+import type { SkillScanRoot } from '..//'
+import type { SkillInstallFilesystem, SkillPathInspection } from '..//'
+import { SKILL_FILE_NAME } from '..//'
+import { isSkillStagingEntryName } from './staging-names'
 
 /** One directory in a discovery root that holds a `SKILL.md`, with everything
  *  the classifier needs to decide which of the three placement kinds it is. */

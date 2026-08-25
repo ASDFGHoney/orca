@@ -22,7 +22,7 @@ import { readSkillPlacementRecoveryJournal } from './skill-placement-recovery-jo
 import {
   readSkillDeleteRecoveryJournal,
   recoverSkillDeleteTransaction
-} from './skill-delete-recovery'
+} from './skill-delete/recovery'
 import { recoverSkillPlacementTransaction } from './skill-placement-transaction'
 
 const MAX_PENDING_TRANSACTION_JOURNALS = 64

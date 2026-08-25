@@ -1,8 +1,4 @@
-import type {
-  SkillDirectoryEntry,
-  SkillFilesystemEntryKind,
-  SkillPathInspection
-} from './skill-install-filesystem'
+import type { SkillDirectoryEntry, SkillFilesystemEntryKind, SkillPathInspection } from '..//'
 
 /**
  * Guest-side enumeration for path-based skill deletion.

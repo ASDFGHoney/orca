@@ -1,7 +1,7 @@
 import type { Dirent } from 'node:fs'
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, sep } from 'node:path'
-import { isSkillStagingEntryName } from './skill-staging-names'
+import { isSkillStagingEntryName } from './skill-delete/staging-names'
 
 export const SKILL_FILE_NAME = 'SKILL.md'
 

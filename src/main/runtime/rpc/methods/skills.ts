@@ -6,7 +6,7 @@ import {
   previewSkillDeleteRequest,
   runSkillDeleteRequest,
   type SkillDeleteRequestDependencies
-} from '../../../skills/skill-delete-request-service'
+} from '../../../skills/skill-delete/request-service'
 import { SkillDiscoveryTargetSchema } from '../../../../shared/skills'
 import {
   SkillInstallPreviewRequestSchema,

@@ -17,7 +17,7 @@ import {
   parseWslListEntriesOutput,
   WSL_INSPECT_PATHS_SCRIPT,
   WSL_LIST_ENTRIES_SCRIPT
-} from './skill-wsl-enumeration-protocol'
+} from './skill-delete/wsl-enumeration-protocol'
 import { SKILL_INSTALL_PROVIDERS } from '../../shared/skill-install-providers'
 import type { SkillProviderRootOverrides } from './skill-provider-destinations'
 import { runWslProcess } from '../wsl/wsl-runner'

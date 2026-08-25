@@ -5,7 +5,7 @@ import {
   WslEnumerationProtocolError,
   WSL_INSPECT_PATHS_SCRIPT,
   WSL_LIST_ENTRIES_SCRIPT
-} from './skill-wsl-enumeration-protocol'
+} from './wsl-enumeration-protocol'
 
 const NUL = '\0'
 

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { posix as pathPosix, win32 as pathWin32 } from 'node:path'
-import type { SkillDeletePlacement } from '../../shared/skill-delete-contract'
-import { nativeSkillPathSemantics } from '../../shared/skill-path-containment'
-import type { SkillDeleteJournalMove } from './skill-delete-recovery'
-import type { SkillInstallFilesystem } from './skill-install-filesystem'
-import { SKILL_FILE_NAME } from './skill-root-file-walk'
-import { skillDeleteStagedName } from './skill-staging-names'
+import type { SkillDeletePlacement } from '../../../shared/skill-delete-contract'
+import { nativeSkillPathSemantics } from '../../../shared/skill-path-containment'
+import type { SkillDeleteJournalMove } from './recovery'
+import type { SkillInstallFilesystem } from '..//'
+import { SKILL_FILE_NAME } from '..//'
+import { skillDeleteStagedName } from './staging-names'
 
 function api(): typeof pathPosix {
   return nativeSkillPathSemantics().sep === '\\' ? pathWin32 : pathPosix

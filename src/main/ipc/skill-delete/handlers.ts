@@ -11,7 +11,7 @@ import {
   previewSkillDeleteRequest,
   runSkillDeleteRequest,
   type SkillDeleteRequestDependencies
-} from '../../skills/skill-delete-request-service'
+} from '../../skills/skill-delete/request-service'
 import { resolveSkillDiscoveryTarget } from '../../skills/skill-discovery-target'
 import { handleMainWindowSkillIpc } from '../skill-ipc-main-window'
 

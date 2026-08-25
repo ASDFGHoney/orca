@@ -1,21 +1,14 @@
 import { rm } from 'node:fs/promises'
 import { join, posix as pathPosix, win32 as pathWin32 } from 'node:path'
-import { readNodeFileWithinLimit } from '../../shared/node-bounded-file-reader'
+import { readNodeFileWithinLimit } from '../../../shared/node-bounded-file-reader'
 import {
   SKILL_DELETE_PLACEMENT_KINDS,
   type SkillDeletePlacementKind
-} from '../../shared/skill-delete-contract'
-import { nativeSkillPathSemantics, skillPathInside } from '../../shared/skill-path-containment'
-import {
-  nativeSkillInstallFilesystem,
-  type SkillInstallFilesystem
-} from './skill-install-filesystem'
-import {
-  removeSkillInstallReceipt,
-  skillInstallStateKey,
-  writeSkillStateFile
-} from './skill-install-provenance'
-import { isSkillDeleteStagedName } from './skill-staging-names'
+} from '../../../shared/skill-delete-contract'
+import { nativeSkillPathSemantics, skillPathInside } from '../../../shared/skill-path-containment'
+import { nativeSkillInstallFilesystem, type SkillInstallFilesystem } from '..//'
+import { removeSkillInstallReceipt, skillInstallStateKey, writeSkillStateFile } from '..//'
+import { isSkillDeleteStagedName } from './staging-names'
 
 const JOURNAL_MAX_BYTES = 4 * 1024 * 1024
 

@@ -228,7 +228,7 @@ vi.mock('../skills', () => ({
   registerSkillsHandlers: registerSkillsHandlersMock
 }))
 
-vi.mock('../skill-delete/skill-delete-ipc-handlers', () => ({
+vi.mock('../skill-delete/handlers', () => ({
   registerSkillDeleteIpcHandlers: registerSkillDeleteIpcHandlersMock
 }))
 

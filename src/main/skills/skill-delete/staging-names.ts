@@ -5,7 +5,7 @@
  * for delete, as a row the user can delete again).
  *
  * The four conventions in the tree today:
- *   `.<name>.orca-skill-delete-<uuid>`      (skill-delete-service)
+ *   `.<name>.orca-skill-delete-<uuid>`      (service)
  *   `.<name>.orca-remove-backup-<uuid>`     (skill-remove-transaction)
  *   `.<name>.orca-placement-backup-<id>`    (skill-placement-transaction-controller)
  *   `.<name>.orca-placement-staging-<id>`   (skill-placement-transaction-controller)

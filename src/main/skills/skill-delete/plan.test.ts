@@ -2,9 +2,9 @@ import { mkdir, mkdtemp, rm, stat, symlink, utimes, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { SkillDeleteRequest } from '../../shared/skill-delete-contract'
-import { buildSkillDeletePlan } from './skill-delete-plan'
-import { nativeSkillInstallFilesystem } from './skill-install-filesystem'
+import type { SkillDeleteRequest } from '../../../shared/skill-delete-contract'
+import { buildSkillDeletePlan } from './plan'
+import { nativeSkillInstallFilesystem } from '..//'
 
 const roots: string[] = []
 

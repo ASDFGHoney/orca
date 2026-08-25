@@ -8,9 +8,9 @@ import {
   skillDeleteJournalPath,
   writeSkillDeleteJournal,
   type SkillDeleteJournalV1
-} from './skill-delete-recovery'
-import { writeSkillStateFile } from './skill-install-provenance'
-import { skillDeleteStagedName } from './skill-staging-names'
+} from './recovery'
+import { writeSkillStateFile } from '..//'
+import { skillDeleteStagedName } from './staging-names'
 
 const roots: string[] = []
 

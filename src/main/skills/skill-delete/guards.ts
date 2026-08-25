@@ -1,16 +1,16 @@
 import { posix as pathPosix, win32 as pathWin32 } from 'node:path'
-import { skillFileMaxDepth } from '../../shared/skill-discovery-depth'
+import { skillFileMaxDepth } from '../../../shared/skill-discovery-depth'
 import type {
   SkillDeleteBlockReason,
   SkillDeletePlacement
-} from '../../shared/skill-delete-contract'
+} from '../../../shared/skill-delete-contract'
 import {
   skillPathDepthBelow,
   skillPathsEqual,
   type SkillPathSemantics
-} from '../../shared/skill-path-containment'
-import type { SkillScanRoot } from './skill-discovery-sources'
-import type { SkillPlacementCandidate } from './skill-delete-enumeration'
+} from '../../../shared/skill-path-containment'
+import type { SkillScanRoot } from '..//'
+import type { SkillPlacementCandidate } from './enumeration'
 
 /**
  * Headroom against ordinary clock and read skew, not against WSL's

@@ -1,17 +1,17 @@
 import { posix as pathPosix, win32 as pathWin32 } from 'node:path'
-import type { Repo } from '../../shared/repo-types'
+import type { Repo } from '../../../shared/repo-types'
 import type {
   SkillDeleteBlockReason,
   SkillDeletePlan,
   SkillDeletePlanEntry,
   SkillDeleteRequest,
   SkillDeleteTargetSkill
-} from '../../shared/skill-delete-contract'
-import { normalizedSkillPath, type SkillPathSemantics } from '../../shared/skill-path-containment'
+} from '../../../shared/skill-delete-contract'
 import {
-  enumerateSkillPlacementCandidates,
-  requireEnumerableFilesystem
-} from './skill-delete-enumeration'
+  normalizedSkillPath,
+  type SkillPathSemantics
+} from '../../../shared/skill-path-containment'
+import { enumerateSkillPlacementCandidates, requireEnumerableFilesystem } from './enumeration'
 import {
   blockedCanonicalReason,
   classifySkillPlacement,
@@ -19,12 +19,12 @@ import {
   owningSkillRoot,
   type ClassifiedPlacement,
   type SkillDeleteGuardContext
-} from './skill-delete-guards'
-import { buildSkillDeleteRootSet } from './skill-delete-roots'
-import type { ResolvedSkillDiscoveryTarget } from './skill-discovery-target'
-import type { SkillInstallFilesystem } from './skill-install-filesystem'
-import type { SkillProviderRootOverrides } from './skill-provider-destinations'
-import type { SkillScanRoot } from './skill-discovery-sources'
+} from './guards'
+import { buildSkillDeleteRootSet } from './roots'
+import type { ResolvedSkillDiscoveryTarget } from '..//'
+import type { SkillInstallFilesystem } from '..//'
+import type { SkillProviderRootOverrides } from '..//'
+import type { SkillScanRoot } from '..//'
 
 /** Overlapping roots can reach one directory twice. Staging the same path twice
  *  would fail the second rename and roll the whole skill back. */

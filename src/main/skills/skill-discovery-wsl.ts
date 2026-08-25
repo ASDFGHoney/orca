@@ -17,7 +17,7 @@ import {
 } from './skill-discovery-sources'
 import { discoverClaudePluginSkillSourcesInWsl } from './claude-plugin-skill-sources-wsl'
 import type { SkillProviderRootOverrides } from './skill-provider-destinations'
-import { SKILL_STAGING_GLOB } from './skill-staging-names'
+import { SKILL_STAGING_GLOB } from './skill-delete/staging-names'
 import { skillFileMaxDepth } from '../../shared/skill-discovery-depth'
 
 const MAX_MARKDOWN_BYTES = 256 * 1024

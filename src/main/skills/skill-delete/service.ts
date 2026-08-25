@@ -1,36 +1,33 @@
 import { rm } from 'node:fs/promises'
 import { posix as pathPosix, win32 as pathWin32 } from 'node:path'
-import type { Repo } from '../../shared/repo-types'
+import type { Repo } from '../../../shared/repo-types'
 import type {
   SkillDeletePlan,
   SkillDeletePlanEntry,
   SkillDeleteRequest,
   SkillDeleteResult,
   SkillDeleteResultEntry
-} from '../../shared/skill-delete-contract'
-import { nativeSkillPathSemantics } from '../../shared/skill-path-containment'
-import { buildSkillDeletePlan, type ResolvedSkillDeletePlan } from './skill-delete-plan'
+} from '../../../shared/skill-delete-contract'
+import { nativeSkillPathSemantics } from '../../../shared/skill-path-containment'
+import { buildSkillDeletePlan, type ResolvedSkillDeletePlan } from './plan'
 import {
   recoverSkillDeleteTransaction,
   skillDeleteJournalPath,
   writeSkillDeleteJournal,
   type SkillDeleteJournalMove,
   type SkillDeleteJournalV1
-} from './skill-delete-recovery'
+} from './recovery'
 import {
   planSkillDeleteMoves,
   removeStagedSkillDeleteMoves,
   stageSkillDeleteMoves
-} from './skill-delete-staging'
-import {
-  clearSkillDiscoveryCaches,
-  type ResolvedSkillDiscoveryTarget
-} from './skill-discovery-target'
-import { acquireSkillInstallLock, skillInstallLockPath } from './skill-install-lock'
-import { removeSkillInstallReceipt } from './skill-install-provenance'
-import type { SkillInstallFilesystem } from './skill-install-filesystem'
-import type { SkillProviderRootOverrides } from './skill-provider-destinations'
-import { recordSkillDeleteOperation } from './skill-operation-observability'
+} from './staging'
+import { clearSkillDiscoveryCaches, type ResolvedSkillDiscoveryTarget } from '..//'
+import { acquireSkillInstallLock, skillInstallLockPath } from '..//'
+import { removeSkillInstallReceipt } from '..//'
+import type { SkillInstallFilesystem } from '..//'
+import type { SkillProviderRootOverrides } from '..//'
+import { recordSkillDeleteOperation } from '..//'
 
 export type SkillDeleteServiceInput = {
   request: SkillDeleteRequest
