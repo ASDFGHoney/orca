@@ -1836,6 +1836,22 @@ function Terminal(): React.JSX.Element | null {
     [consumeSuppressedPtyExit]
   )
 
+  const handleActivateTab = useCallback(
+    (tabId: string) => {
+      const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
+      if (activeWorktreeId && isWebRuntimeSessionActive(runtimeEnvironmentId)) {
+        void activateWebRuntimeSessionTab({
+          worktreeId: activeWorktreeId,
+          tabId,
+          environmentId: runtimeEnvironmentId
+        })
+      }
+      setActiveTab(tabId)
+      setActiveTabType('terminal')
+    },
+    [activeWorktreeId, setActiveTab, setActiveTabType]
+  )
+
   // Bulk-close for the tab bar: unlike closeUnifiedTab it must route each id to
   // its backend (web-runtime sessions, terminals, editor files, browser tabs),
   // skip pinned tabs, and defer dirty editor files to the confirm flow.
@@ -1905,10 +1921,18 @@ function Terminal(): React.JSX.Element | null {
       guardBulkTerminalClose({
         worktreeId,
         terminalTabIds: collectBulkTerminalTabIds(useAppStore.getState(), worktreeId, tabIds),
+        revealTab: handleActivateTab,
         onProceed: performClose
       })
     },
-    [activeWorktreeId, closeBrowserTab, closeFile, closeTab, queueEditorCloseRequests]
+    [
+      activeWorktreeId,
+      closeBrowserTab,
+      closeFile,
+      closeTab,
+      handleActivateTab,
+      queueEditorCloseRequests
+    ]
   )
 
   const handleCloseOthers = useCallback(
@@ -1971,22 +1995,6 @@ function Terminal(): React.JSX.Element | null {
       queueEditorCloseRequests(dirtyFileIds)
     }
   }, [activeWorktreeId, closeFile, queueEditorCloseRequests])
-
-  const handleActivateTab = useCallback(
-    (tabId: string) => {
-      const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
-      if (activeWorktreeId && isWebRuntimeSessionActive(runtimeEnvironmentId)) {
-        void activateWebRuntimeSessionTab({
-          worktreeId: activeWorktreeId,
-          tabId,
-          environmentId: runtimeEnvironmentId
-        })
-      }
-      setActiveTab(tabId)
-      setActiveTabType('terminal')
-    },
-    [activeWorktreeId, setActiveTab, setActiveTabType]
-  )
 
   const handleTogglePaneExpand = useCallback(
     (tabId: string) => {

@@ -3,12 +3,13 @@ import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspec
 import { resolvePinnedTabLabel } from '@/store/pinned-tab-close-guard'
 import { useRunningTerminalCloseConfirmStore } from '@/store/running-terminal-close-confirm'
 import type { AppState } from '@/store/types'
-import type { CloseTerminalDialogCopyKind } from '../terminal-pane/CloseTerminalDialog'
 import { collectTabPtyIds, RUNNING_CLOSE_PROBE_TIMEOUT_MS } from './running-terminal-close-guard'
 import { resolveBusyPtyCloseCopyKind } from './terminal-close-copy-kind'
 
 /** A terminal tab in the bulk set, with the PTYs it could still own. */
 type BulkCloseCandidate = { terminalTabId: string; ptyIds: string[] }
+
+type BulkCloseTabState = Pick<AppState, 'unifiedTabsByWorktree' | 'tabsByWorktree'>
 
 /**
  * Terminal tab ids (entity ids) inside a mixed tab-strip id list, skipping the pinned tabs
@@ -16,7 +17,7 @@ type BulkCloseCandidate = { terminalTabId: string; ptyIds: string[] }
  * strip emits entity ids for terminals and unified ids for editors.
  */
 export function collectBulkTerminalTabIds(
-  state: Pick<AppState, 'unifiedTabsByWorktree' | 'tabsByWorktree'>,
+  state: BulkCloseTabState,
   worktreeId: string,
   visibleIds: readonly string[]
 ): string[] {
@@ -41,28 +42,38 @@ export function collectBulkTerminalTabIds(
   return terminalTabIds
 }
 
-/** Stable dedupe key so a double-fired bulk close merges into one prompt. A lone busy tab
- *  keys on its real id, so it also merges with that tab's own single-close prompt. */
-function resolveRequestKey(busyTabIds: readonly string[]): string {
-  return busyTabIds.length === 1 ? busyTabIds[0]! : `bulk:${[...busyTabIds].sort().join(',')}`
+function terminalTabStillOpen(
+  state: BulkCloseTabState,
+  worktreeId: string,
+  terminalTabId: string
+): boolean {
+  return (
+    (state.tabsByWorktree?.[worktreeId] ?? []).some((tab) => tab.id === terminalTabId) ||
+    (state.unifiedTabsByWorktree?.[worktreeId] ?? []).some(
+      (tab) => tab.contentType === 'terminal' && tab.entityId === terminalTabId
+    )
+  )
 }
 
 /**
- * Routes "Close Others" / "Close Tabs To The Right" / "Close Tabs To The Left" through one
- * aggregated running-process confirmation instead of the modal storm that made these paths
- * opt out of the prompt entirely. Proceeds synchronously when no tab in the set has a live
- * PTY, so idle bulk closes keep today's behavior.
+ * Routes "Close Others" / "Close Tabs To The Right" / "Close Tabs To The Left" / "Close
+ * split pane" through the running-process confirmation those paths used to skip outright.
  *
- * Cancel abandons the whole bulk close rather than closing the idle subset: a partial,
- * un-undoable close is a worse surprise than doing nothing and letting the user retry.
+ * Shape follows the unsaved-editor close flow: walk the busy tabs in strip order, jump to
+ * each one so the prompt names something the user is looking at, and ask about it on its
+ * own. Nothing closes until every prompt is answered — cancelling any one of them abandons
+ * the whole bulk close, so the user never ends up with a half-applied close they cannot
+ * undo. A set with nothing running never asks and stays fully synchronous.
  */
 export function guardBulkTerminalClose(params: {
   worktreeId: string
   terminalTabIds: readonly string[]
+  /** Reveals a tab before its prompt. Omitted by surfaces that cannot activate a tab. */
+  revealTab?: (terminalTabId: string) => void
   onProceed: () => void
   onCancel?: () => void
 }): void {
-  const { worktreeId, terminalTabIds, onProceed, onCancel } = params
+  const { worktreeId, terminalTabIds, revealTab, onProceed, onCancel } = params
   const state = useAppStore.getState()
   const settings = state.settings
   const candidates: BulkCloseCandidate[] = []
@@ -89,33 +100,49 @@ export function guardBulkTerminalClose(params: {
     decided = true
     onProceed()
   }
-  const confirmClose = (busy: readonly BulkCloseCandidate[]): void => {
-    if (decided) {
+
+  /** Asks about one busy tab at a time; the whole close waits on the last answer. */
+  const askInTurn = (queue: readonly BulkCloseCandidate[], index: number): void => {
+    const candidate = queue[index]
+    if (!candidate) {
+      onProceed()
       return
     }
     const latest = useAppStore.getState()
-    const busyTabLabels = busy.map((candidate) =>
-      resolvePinnedTabLabel(latest, worktreeId, candidate.terminalTabId)
-    )
-    // Why: an agent anywhere in the set wins the wording, matching the single-tab prompt's
-    // mixed-split rule — stopping an agent mid-task is the costlier surprise.
-    const copyKind: CloseTerminalDialogCopyKind = busy.some(
-      (candidate) =>
-        resolveBusyPtyCloseCopyKind(candidate.terminalTabId, candidate.ptyIds) === 'agent'
-    )
-      ? 'agent'
-      : 'command'
+    // Why: an earlier prompt can sit open long enough for this tab to exit on its own, and
+    // asking to stop a tab the user can no longer see would be nonsense.
+    if (!terminalTabStillOpen(latest, worktreeId, candidate.terminalTabId)) {
+      askInTurn(queue, index + 1)
+      return
+    }
+    // Why: jump to the tab first so the prompt is about the pane in front of the user
+    // rather than one somewhere off in the strip.
+    revealTab?.(candidate.terminalTabId)
     useRunningTerminalCloseConfirmStore.getState().requestRunningTerminalCloseConfirm({
-      terminalTabId: resolveRequestKey(busy.map((candidate) => candidate.terminalTabId)),
-      tabLabel: busyTabLabels[0] ?? '',
-      busyTabLabels,
-      copyKind,
-      onConfirm: onProceed,
-      ...(onCancel ? { onCancel } : {})
+      terminalTabId: candidate.terminalTabId,
+      tabLabel: resolvePinnedTabLabel(latest, worktreeId, candidate.terminalTabId),
+      copyKind: resolveBusyPtyCloseCopyKind(candidate.terminalTabId, candidate.ptyIds),
+      onConfirm: ({ dontAskAgain }) => {
+        // Why: the user opted out part-way through the set, so close the rest outright
+        // instead of raising the prompt they just dismissed for good.
+        if (dontAskAgain) {
+          onProceed()
+          return
+        }
+        askInTurn(queue, index + 1)
+      },
+      // Why: one cancel abandons the entire bulk close. Closing the tabs already approved
+      // would leave a partial result the user cannot undo, so nothing closes at all.
+      onCancel: () => onCancel?.()
     })
-    // Why: only once the prompt is actually up — if either call above throws, the close must
-    // still be free to fall through and happen.
+  }
+
+  const startAsking = (busy: readonly BulkCloseCandidate[]): void => {
+    if (decided) {
+      return
+    }
     decided = true
+    askInTurn(busy, 0)
   }
 
   const probes = candidates.flatMap((candidate) =>
@@ -124,8 +151,8 @@ export function guardBulkTerminalClose(params: {
   const probeTimeout = setTimeout(() => {
     try {
       // Why: a probe that has not answered yet is unknown, not idle. Ask about every
-      // candidate so a degraded relay costs a click instead of killed remote work.
-      confirmClose(candidates)
+      // candidate so a degraded relay costs clicks instead of killed remote work.
+      startAsking(candidates)
     } catch {
       proceedNow()
     }
@@ -161,8 +188,8 @@ export function guardBulkTerminalClose(params: {
         proceedNow()
         return
       }
-      // Why: walk `candidates` rather than the map so the prompt lists tabs in strip order.
-      confirmClose(
+      // Why: walk `candidates` rather than the map so the prompts arrive in strip order.
+      startAsking(
         candidates
           .filter((candidate) => busyPtyIdsByTabId.has(candidate.terminalTabId))
           .map((candidate) => ({

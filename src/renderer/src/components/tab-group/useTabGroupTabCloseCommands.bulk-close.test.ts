@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Tab } from '../../../../shared/tab-types'
 
 const mocks = vi.hoisted(() => ({
+  activateTerminal: vi.fn(),
   closeBrowserTab: vi.fn(),
   closeFile: vi.fn(),
   closeTab: vi.fn(),
@@ -60,19 +61,34 @@ const GROUP_TABS = [
 ] as unknown as Tab[]
 
 // Why: `useCallback` is stubbed to identity above, so the hook is a plain factory here.
+function visibleRequest() {
+  return useRunningTerminalCloseConfirmStore.getState().runningTerminalCloseConfirm
+}
+
 function useCloseCommands() {
-  return useTabGroupTabCloseCommands({ worktreeId: 'wt-1', groupTabs: GROUP_TABS })
+  return useTabGroupTabCloseCommands({
+    worktreeId: 'wt-1',
+    groupTabs: GROUP_TABS,
+    revealTerminal: mocks.activateTerminal
+  })
 }
 
 async function settleProbe(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
+  for (let tick = 0; tick < 12; tick += 1) {
+    await Promise.resolve()
+  }
 }
+
+/** Monotonic per-test clock; the confirm store's stray-action guard is module state keyed
+ *  to Date.now(), so each test needs a clock ahead of whatever the previous one armed. */
+let testClock = Date.UTC(2026, 0, 1)
 
 describe('useTabGroupTabCloseCommands closeMany', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers()
+    testClock += 60 * 60 * 1000
+    vi.setSystemTime(testClock)
     storeBox.state = {
       settings: {},
       ptyIdsByTabId: { 'tab-a': ['pty-a'], 'tab-b': ['pty-b'] },
@@ -90,7 +106,12 @@ describe('useTabGroupTabCloseCommands closeMany', () => {
       setActiveWorktree: mocks.setActiveWorktree,
       reconcileWorktreeTabModel: () => ({ renderableTabCount: 1 })
     }
+    useRunningTerminalCloseConfirmStore.getState().confirmAllRunningTerminalCloses()
     useRunningTerminalCloseConfirmStore.setState({ runningTerminalCloseConfirm: null })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('closes straight through when no tab in the set is busy', async () => {
@@ -106,7 +127,7 @@ describe('useTabGroupTabCloseCommands closeMany', () => {
     expect(useRunningTerminalCloseConfirmStore.getState().runningTerminalCloseConfirm).toBeNull()
   })
 
-  it('holds every close behind one prompt when tabs are busy, then runs them on confirm', async () => {
+  it('asks about each busy tab in turn, jumping to it, and closes only after the last answer', async () => {
     mocks.inspectRuntimeTerminalProcess.mockResolvedValue({
       hasChildProcesses: true,
       unavailable: false
@@ -116,14 +137,22 @@ describe('useTabGroupTabCloseCommands closeMany', () => {
     await settleProbe()
 
     expect(mocks.closeTab).not.toHaveBeenCalled()
-    const request = useRunningTerminalCloseConfirmStore.getState().runningTerminalCloseConfirm
-    expect(request?.busyTabLabels).toEqual(['npm run dev', 'pytest'])
+    expect(mocks.activateTerminal).toHaveBeenLastCalledWith('tab-a')
+    expect(visibleRequest()?.tabLabel).toBe('npm run dev')
 
     useRunningTerminalCloseConfirmStore.getState().confirmRunningTerminalClose()
+
+    expect(mocks.closeTab).not.toHaveBeenCalled()
+    expect(mocks.activateTerminal).toHaveBeenLastCalledWith('tab-b')
+    expect(visibleRequest()?.tabLabel).toBe('pytest')
+
+    vi.advanceTimersByTime(400)
+    useRunningTerminalCloseConfirmStore.getState().confirmRunningTerminalClose()
+
     expect(mocks.closeTab).toHaveBeenCalledTimes(2)
   })
 
-  it('closes nothing when the prompt is cancelled', async () => {
+  it('closes nothing when any prompt in the run is cancelled', async () => {
     mocks.inspectRuntimeTerminalProcess.mockResolvedValue({
       hasChildProcesses: true,
       unavailable: false
@@ -131,6 +160,8 @@ describe('useTabGroupTabCloseCommands closeMany', () => {
 
     useCloseCommands().closeMany(['unified-a', 'unified-b'])
     await settleProbe()
+    useRunningTerminalCloseConfirmStore.getState().confirmRunningTerminalClose()
+    vi.advanceTimersByTime(400)
     useRunningTerminalCloseConfirmStore.getState().dismissRunningTerminalClose()
 
     expect(mocks.closeTab).not.toHaveBeenCalled()

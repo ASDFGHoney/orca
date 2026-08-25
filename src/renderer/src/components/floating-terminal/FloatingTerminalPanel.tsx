@@ -930,10 +930,19 @@ export function FloatingTerminalPanel({
           FLOATING_TERMINAL_WORKTREE_ID,
           visibleIds
         ),
+        revealTab: activateFloatingItem,
         onProceed: performClose
       })
     },
-    [activeGroup, closeBrowserTab, closeFile, closeTab, closeUnifiedTab, queueEditorCloseRequests]
+    [
+      activateFloatingItem,
+      activeGroup,
+      closeBrowserTab,
+      closeFile,
+      closeTab,
+      closeUnifiedTab,
+      queueEditorCloseRequests
+    ]
   )
 
   // Single confirmed-close authority for one floating item; every content type routes through a pin

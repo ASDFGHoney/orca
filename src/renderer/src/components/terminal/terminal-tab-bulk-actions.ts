@@ -70,6 +70,7 @@ export function closeOtherTerminalTabs(tabId: string, activeWorktreeId: string |
   guardBulkTerminalClose({
     worktreeId: activeWorktreeId,
     terminalTabIds: collectBulkTerminalTabIds(state, activeWorktreeId, closableIds),
+    revealTab: (terminalTabId) => useAppStore.getState().setActiveTab(terminalTabId),
     onProceed: performClose
   })
 }
@@ -133,6 +134,7 @@ export function closeTerminalTabsToRight(tabId: string, activeWorktreeId: string
   guardBulkTerminalClose({
     worktreeId: activeWorktreeId,
     terminalTabIds: closableIds.filter((id) => terminalIdSet.has(id)),
+    revealTab: (terminalTabId) => useAppStore.getState().setActiveTab(terminalTabId),
     onProceed: performClose
   })
 }

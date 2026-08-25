@@ -17,10 +17,13 @@ import { browserWorkspaceHasRemoteOwner } from '@/runtime/remote-browser-tab-own
 
 export function useTabGroupTabCloseCommands({
   worktreeId,
-  groupTabs
+  groupTabs,
+  revealTerminal
 }: {
   worktreeId: string
   groupTabs: Tab[]
+  /** Activates a terminal so a bulk close can jump to each busy tab before asking. */
+  revealTerminal: (terminalTabId: string) => void
 }) {
   const closeUnifiedTab = useAppStore((state) => state.closeUnifiedTab)
   const closeTab = useAppStore((state) => state.closeTab)
@@ -185,10 +188,19 @@ export function useTabGroupTabCloseCommands({
       guardBulkTerminalClose({
         worktreeId,
         terminalTabIds: collectBulkTerminalTabIds(useAppStore.getState(), worktreeId, itemIds),
+        revealTab: revealTerminal,
         onProceed: performClose
       })
     },
-    [closeBrowserTab, closeEditorIfUnreferenced, closeTab, closeUnifiedTab, groupTabs, worktreeId]
+    [
+      closeBrowserTab,
+      closeEditorIfUnreferenced,
+      closeTab,
+      closeUnifiedTab,
+      groupTabs,
+      revealTerminal,
+      worktreeId
+    ]
   )
 
   return { closeItem, closeMany, leaveWorktreeIfEmpty }

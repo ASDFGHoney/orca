@@ -20,6 +20,11 @@ import { collectBulkTerminalTabIds, guardBulkTerminalClose } from './bulk-termin
 const LEAF_A = '11111111-1111-4111-8111-111111111111'
 const LEAF_B = '22222222-2222-4222-8222-222222222222'
 
+const TERMINAL_TABS = [
+  { id: 'unified-a', entityId: 'tab-a', contentType: 'terminal', label: 'npm run dev' },
+  { id: 'unified-b', entityId: 'tab-b', contentType: 'terminal', label: 'pytest' }
+]
+
 function setState(overrides: Record<string, unknown> = {}): void {
   getStateMock.mockReturnValue({
     settings: { activeRuntimeEnvironmentId: null },
@@ -28,24 +33,26 @@ function setState(overrides: Record<string, unknown> = {}): void {
       'tab-a': { ptyIdsByLeafId: { [LEAF_A]: 'pty-a' } },
       'tab-b': { ptyIdsByLeafId: { [LEAF_B]: 'pty-b' } }
     },
-    unifiedTabsByWorktree: {
-      'wt-1': [
-        { id: 'unified-a', entityId: 'tab-a', contentType: 'terminal', label: 'npm run dev' },
-        { id: 'unified-b', entityId: 'tab-b', contentType: 'terminal', label: 'pytest' }
-      ]
-    },
+    unifiedTabsByWorktree: { 'wt-1': TERMINAL_TABS },
     tabsByWorktree: { 'wt-1': [{ id: 'tab-a' }, { id: 'tab-b' }] },
     agentStatusByPaneKey: {},
     ...overrides
   })
 }
 
-function guard(onProceed = vi.fn(), onCancel?: () => void): void {
+function guard(
+  overrides: {
+    onProceed?: () => void
+    onCancel?: () => void
+    revealTab?: (terminalTabId: string) => void
+  } = {}
+): void {
   guardBulkTerminalClose({
     worktreeId: 'wt-1',
     terminalTabIds: ['tab-a', 'tab-b'],
-    onProceed,
-    ...(onCancel ? { onCancel } : {})
+    onProceed: overrides.onProceed ?? vi.fn(),
+    ...(overrides.onCancel ? { onCancel: overrides.onCancel } : {}),
+    ...(overrides.revealTab ? { revealTab: overrides.revealTab } : {})
   })
 }
 
@@ -53,10 +60,21 @@ function visibleRequest() {
   return useRunningTerminalCloseConfirmStore.getState().runningTerminalCloseConfirm
 }
 
+function confirmVisible(): void {
+  useRunningTerminalCloseConfirmStore.getState().confirmRunningTerminalClose()
+}
+
+/** The store ignores an action landing within 350ms of a prompt being replaced in place. */
+function advancePastStrayActionGuard(): void {
+  vi.advanceTimersByTime(400)
+}
+
 async function settleProbe(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
-  await Promise.resolve()
+  // Why: allSettled plus the guard's own then/catch chain take several microtask turns; an
+  // under-drained probe would resolve during the *next* test and pollute its prompt queue.
+  for (let tick = 0; tick < 12; tick += 1) {
+    await Promise.resolve()
+  }
 }
 
 describe('collectBulkTerminalTabIds', () => {
@@ -90,9 +108,23 @@ describe('collectBulkTerminalTabIds', () => {
   })
 })
 
+/** Monotonic per-test clock; see the stray-action guard note in beforeEach. */
+let testClock = Date.UTC(2026, 0, 1)
+
 describe('guardBulkTerminalClose', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Why: the store's stray-action guard keys off Date.now(), so the sequential prompts
+    // need a clock the test can move rather than real 350ms sleeps.
+    vi.useFakeTimers()
+    // Why: that guard is module state keyed to Date.now(), and every fake clock restarts at
+    // the same real time — so each test needs a clock strictly ahead of whatever the
+    // previous one armed, or its very first confirm is silently swallowed.
+    testClock += 60 * 60 * 1000
+    vi.setSystemTime(testClock)
+    // Why: the pending-request queue is closure state that setState cannot reach, so drain
+    // it or a leftover request takes the visible slot mid-sequence in this test.
+    useRunningTerminalCloseConfirmStore.getState().confirmAllRunningTerminalCloses()
     setState()
     inspectRuntimeTerminalProcessMock.mockResolvedValue({
       hasChildProcesses: false,
@@ -109,7 +141,7 @@ describe('guardBulkTerminalClose', () => {
     setState({ ptyIdsByTabId: {}, terminalLayoutsByTabId: {} })
     const onProceed = vi.fn()
 
-    guard(onProceed)
+    guard({ onProceed })
 
     expect(onProceed).toHaveBeenCalledTimes(1)
     expect(inspectRuntimeTerminalProcessMock).not.toHaveBeenCalled()
@@ -125,7 +157,7 @@ describe('guardBulkTerminalClose', () => {
     })
     const onProceed = vi.fn()
 
-    guard(onProceed)
+    guard({ onProceed })
 
     expect(onProceed).toHaveBeenCalledTimes(1)
     expect(inspectRuntimeTerminalProcessMock).not.toHaveBeenCalled()
@@ -134,7 +166,7 @@ describe('guardBulkTerminalClose', () => {
   it('proceeds without asking when every probe reports an idle shell', async () => {
     const onProceed = vi.fn()
 
-    guard(onProceed)
+    guard({ onProceed })
     await settleProbe()
 
     expect(inspectRuntimeTerminalProcessMock).toHaveBeenCalledTimes(2)
@@ -142,41 +174,73 @@ describe('guardBulkTerminalClose', () => {
     expect(visibleRequest()).toBeNull()
   })
 
-  it('raises one aggregated prompt naming every busy tab', async () => {
+  it('asks about one busy tab at a time and closes only after the last answer', async () => {
     inspectRuntimeTerminalProcessMock.mockResolvedValue({
       hasChildProcesses: true,
       unavailable: false
     })
     const onProceed = vi.fn()
 
-    guard(onProceed)
+    guard({ onProceed })
     await settleProbe()
 
+    expect(visibleRequest()?.terminalTabId).toBe('tab-a')
+    expect(visibleRequest()?.tabLabel).toBe('npm run dev')
     expect(onProceed).not.toHaveBeenCalled()
-    const request = visibleRequest()
-    expect(request?.busyTabLabels).toEqual(['npm run dev', 'pytest'])
-    expect(request?.terminalTabId).toBe('bulk:tab-a,tab-b')
-    expect(request?.copyKind).toBe('command')
 
-    useRunningTerminalCloseConfirmStore.getState().confirmRunningTerminalClose()
+    confirmVisible()
+
+    // Why: still nothing closed — the second tab has not been answered yet.
+    expect(onProceed).not.toHaveBeenCalled()
+    expect(visibleRequest()?.terminalTabId).toBe('tab-b')
+    expect(visibleRequest()?.tabLabel).toBe('pytest')
+
+    advancePastStrayActionGuard()
+    confirmVisible()
+
     expect(onProceed).toHaveBeenCalledTimes(1)
+    expect(visibleRequest()).toBeNull()
   })
 
-  it('lists only the busy tabs, keeping strip order', async () => {
+  it('reveals each busy tab before raising its prompt', async () => {
+    inspectRuntimeTerminalProcessMock.mockResolvedValue({
+      hasChildProcesses: true,
+      unavailable: false
+    })
+    const revealed: string[] = []
+    const revealTab = vi.fn((terminalTabId: string) => {
+      // Why: read the visible prompt strictly before this tab's own opens, so a reveal that
+      // lands after the dialog would fail here instead of silently passing.
+      expect(visibleRequest()?.terminalTabId).not.toBe(terminalTabId)
+      revealed.push(terminalTabId)
+    })
+
+    guard({ revealTab })
+    await settleProbe()
+    confirmVisible()
+    advancePastStrayActionGuard()
+    confirmVisible()
+
+    expect(revealed).toEqual(['tab-a', 'tab-b'])
+  })
+
+  it('only asks about the tabs that reported a live child', async () => {
     inspectRuntimeTerminalProcessMock.mockImplementation((_settings, ptyId: string) =>
       Promise.resolve({ hasChildProcesses: ptyId === 'pty-b', unavailable: false })
     )
+    const onProceed = vi.fn()
 
-    guard()
+    guard({ onProceed })
     await settleProbe()
 
-    const request = visibleRequest()
-    expect(request?.busyTabLabels).toEqual(['pytest'])
-    // Why: a lone busy tab keys on its real id so it merges with that tab's own prompt.
-    expect(request?.terminalTabId).toBe('tab-b')
+    expect(visibleRequest()?.terminalTabId).toBe('tab-b')
+
+    confirmVisible()
+
+    expect(onProceed).toHaveBeenCalledTimes(1)
   })
 
-  it('cancelling abandons the whole bulk close', async () => {
+  it('cancelling one prompt abandons the whole bulk close', async () => {
     inspectRuntimeTerminalProcessMock.mockResolvedValue({
       hasChildProcesses: true,
       unavailable: false
@@ -184,22 +248,64 @@ describe('guardBulkTerminalClose', () => {
     const onProceed = vi.fn()
     const onCancel = vi.fn()
 
-    guard(onProceed, onCancel)
+    guard({ onProceed, onCancel })
     await settleProbe()
+    confirmVisible()
+    expect(visibleRequest()?.terminalTabId).toBe('tab-b')
+
+    advancePastStrayActionGuard()
     useRunningTerminalCloseConfirmStore.getState().dismissRunningTerminalClose()
 
+    // Why: the already-approved tab must not close either — a half-applied bulk close is
+    // exactly what cancel has to prevent.
     expect(onProceed).not.toHaveBeenCalled()
     expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(visibleRequest()).toBeNull()
   })
 
-  it('words the prompt for agents when any busy pane is one', async () => {
-    setState({
-      agentStatusByPaneKey: { [`tab-b:${LEAF_B}`]: { agentType: 'claude' } }
-    })
+  it('stops asking about the rest of the set once the user opts out', async () => {
     inspectRuntimeTerminalProcessMock.mockResolvedValue({
       hasChildProcesses: true,
       unavailable: false
     })
+    const onProceed = vi.fn()
+
+    guard({ onProceed })
+    await settleProbe()
+    useRunningTerminalCloseConfirmStore.getState().confirmAllRunningTerminalCloses()
+
+    expect(onProceed).toHaveBeenCalledTimes(1)
+    expect(visibleRequest()).toBeNull()
+  })
+
+  it('skips a queued tab that exited while an earlier prompt was open', async () => {
+    inspectRuntimeTerminalProcessMock.mockResolvedValue({
+      hasChildProcesses: true,
+      unavailable: false
+    })
+    const onProceed = vi.fn()
+
+    guard({ onProceed })
+    await settleProbe()
+    expect(visibleRequest()?.terminalTabId).toBe('tab-a')
+    setState({
+      unifiedTabsByWorktree: { 'wt-1': [TERMINAL_TABS[0]!] },
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-a' }] }
+    })
+
+    confirmVisible()
+
+    expect(visibleRequest()).toBeNull()
+    expect(onProceed).toHaveBeenCalledTimes(1)
+  })
+
+  it('words the prompt for an agent pane', async () => {
+    setState({
+      agentStatusByPaneKey: { [`tab-b:${LEAF_B}`]: { agentType: 'claude' } }
+    })
+    inspectRuntimeTerminalProcessMock.mockImplementation((_settings, ptyId: string) =>
+      Promise.resolve({ hasChildProcesses: ptyId === 'pty-b', unavailable: false })
+    )
 
     guard()
     await settleProbe()
@@ -214,7 +320,7 @@ describe('guardBulkTerminalClose', () => {
     })
     const onProceed = vi.fn()
 
-    guard(onProceed)
+    guard({ onProceed })
     await settleProbe()
 
     expect(onProceed).toHaveBeenCalledTimes(1)
@@ -222,33 +328,32 @@ describe('guardBulkTerminalClose', () => {
   })
 
   it('asks rather than closes when the probe never answers', async () => {
-    vi.useFakeTimers()
     inspectRuntimeTerminalProcessMock.mockReturnValue(new Promise(() => {}))
     const onProceed = vi.fn()
 
-    guard(onProceed)
+    guard({ onProceed })
     vi.advanceTimersByTime(RUNNING_CLOSE_PROBE_TIMEOUT_MS)
 
     expect(onProceed).not.toHaveBeenCalled()
-    expect(visibleRequest()?.busyTabLabels).toEqual(['npm run dev', 'pytest'])
+    expect(visibleRequest()?.terminalTabId).toBe('tab-a')
   })
 
-  it('merges a repeated bulk close into the open prompt instead of stacking one', async () => {
+  it('guards the next prompt against a stray action meant for the previous one', async () => {
     inspectRuntimeTerminalProcessMock.mockResolvedValue({
       hasChildProcesses: true,
       unavailable: false
     })
-    const first = vi.fn()
-    const second = vi.fn()
+    const onProceed = vi.fn()
 
-    guard(first)
+    guard({ onProceed })
     await settleProbe()
-    guard(second)
-    await settleProbe()
+    confirmVisible()
 
-    useRunningTerminalCloseConfirmStore.getState().confirmRunningTerminalClose()
-    expect(first).toHaveBeenCalledTimes(1)
-    expect(second).toHaveBeenCalledTimes(1)
-    expect(visibleRequest()).toBeNull()
+    // Why: a held Enter or double-click aimed at tab-a's prompt must not also answer
+    // tab-b's, which replaced it in place.
+    confirmVisible()
+
+    expect(visibleRequest()?.terminalTabId).toBe('tab-b')
+    expect(onProceed).not.toHaveBeenCalled()
   })
 })

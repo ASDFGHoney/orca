@@ -14,15 +14,10 @@ import { translate } from '@/i18n/i18n'
 
 export type CloseTerminalDialogCopyKind = 'command' | 'agent'
 
-/** Beyond this the list stops naming tabs and counts the rest, so the compact confirmation
- *  never grows into a scrolling wall for a 20-tab "Close Others". */
-const MAX_LISTED_BUSY_TAB_LABELS = 5
-
 export default function CloseTerminalDialog({
   open,
   copyKind = 'command',
   tabLabel,
-  busyTabLabels,
   subjectKey,
   onCancel,
   onConfirm
@@ -32,9 +27,6 @@ export default function CloseTerminalDialog({
   /** Names the tab when the prompt can target a tab the user is not looking at
    *  (tab-strip X, middle-click). Omitted for the focused-pane keyboard path. */
   tabLabel?: string
-  /** Names every busy tab when one prompt covers a bulk close ("Close Others" and the
-   *  to-the-side variants). More than one switches the copy to the counted form. */
-  busyTabLabels?: readonly string[]
   /** Identifies what is being closed, for hosts that reuse one open dialog across a queue
    *  of confirmations. Changing it clears the previous subject's "don't ask again" tick. */
   subjectKey?: string
@@ -66,12 +58,7 @@ export default function CloseTerminalDialog({
   }
 
   const isAgent = copyKind === 'agent'
-  const trimmedBusyTabLabels = (busyTabLabels ?? []).map((label) => label.trim()).filter(Boolean)
-  const busyTabCount = trimmedBusyTabLabels.length
-  const isBulk = busyTabCount > 1
-  const listedBusyTabLabels = trimmedBusyTabLabels.slice(0, MAX_LISTED_BUSY_TAB_LABELS)
-  const unlistedBusyTabCount = busyTabCount - listedBusyTabLabels.length
-  const trimmedTabLabel = isBulk ? undefined : tabLabel?.trim()
+  const trimmedTabLabel = tabLabel?.trim()
 
   return (
     <Dialog
@@ -85,76 +72,32 @@ export default function CloseTerminalDialog({
       <DialogContent className="max-w-sm" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="text-sm">
-            {isBulk
-              ? isAgent
-                ? translate(
-                    'components.terminal.pane.CloseTerminalDialog.stopAgentsTitle',
-                    'Stop {{count}} running agents?',
-                    { count: busyTabCount }
-                  )
-                : translate(
-                    'components.terminal.pane.CloseTerminalDialog.stopCommandsTitle',
-                    'Stop {{count}} running commands?',
-                    { count: busyTabCount }
-                  )
-              : isAgent
-                ? translate(
-                    'auto.components.terminal.pane.CloseTerminalDialog.stop_agent_title',
-                    'Stop this agent?'
-                  )
-                : translate(
-                    'auto.components.terminal.pane.CloseTerminalDialog.stop_command_title',
-                    'Stop running command?'
-                  )}
+            {isAgent
+              ? translate(
+                  'auto.components.terminal.pane.CloseTerminalDialog.stop_agent_title',
+                  'Stop this agent?'
+                )
+              : translate(
+                  'auto.components.terminal.pane.CloseTerminalDialog.stop_command_title',
+                  'Stop running command?'
+                )}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            {isBulk
-              ? isAgent
-                ? translate(
-                    'components.terminal.pane.CloseTerminalDialog.stopAgentsDescription',
-                    "Closing these tabs will stop the agents' current work."
-                  )
-                : translate(
-                    'components.terminal.pane.CloseTerminalDialog.stopCommandsDescription',
-                    'Closing these tabs will stop the commands running inside them.'
-                  )
-              : isAgent
-                ? translate(
-                    'auto.components.terminal.pane.CloseTerminalDialog.stop_agent_description',
-                    "Closing this terminal will stop the agent's current work."
-                  )
-                : translate(
-                    'auto.components.terminal.pane.CloseTerminalDialog.stop_command_description',
-                    'Closing this terminal will stop the command running inside it.'
-                  )}
+            {isAgent
+              ? translate(
+                  'auto.components.terminal.pane.CloseTerminalDialog.stop_agent_description',
+                  "Closing this terminal will stop the agent's current work."
+                )
+              : translate(
+                  'auto.components.terminal.pane.CloseTerminalDialog.stop_command_description',
+                  'Closing this terminal will stop the command running inside it.'
+                )}
           </DialogDescription>
         </DialogHeader>
         {trimmedTabLabel ? (
           <p className="truncate text-xs font-medium text-foreground" title={trimmedTabLabel}>
             {trimmedTabLabel}
           </p>
-        ) : null}
-        {isBulk ? (
-          <ul className="flex flex-col gap-0.5">
-            {listedBusyTabLabels.map((label, index) => (
-              <li
-                key={`${index}-${label}`}
-                className="truncate text-xs font-medium text-foreground"
-                title={label}
-              >
-                {label}
-              </li>
-            ))}
-            {unlistedBusyTabCount > 0 ? (
-              <li className="text-xs text-muted-foreground">
-                {translate(
-                  'components.terminal.pane.CloseTerminalDialog.moreBusyTabs',
-                  '+{{count}} more',
-                  { count: unlistedBusyTabCount }
-                )}
-              </li>
-            ) : null}
-          </ul>
         ) : null}
         <div className="flex items-center gap-2">
           <Checkbox
@@ -180,7 +123,7 @@ export default function CloseTerminalDialog({
             autoFocus
             onClick={() => onConfirm(dontAskAgain)}
           >
-            {isAgent && !isBulk
+            {isAgent
               ? translate(
                   'auto.components.terminal.pane.CloseTerminalDialog.stop_agent_confirm',
                   'Stop Agent'

@@ -13,7 +13,8 @@ export function useTabGroupCloseScopeCommands({
   groupTabs,
   closeItem,
   closeMany,
-  leaveWorktreeIfEmpty
+  leaveWorktreeIfEmpty,
+  revealTerminal
 }: {
   groupId: string
   worktreeId: string
@@ -25,6 +26,8 @@ export function useTabGroupCloseScopeCommands({
   ) => void
   closeMany: (itemIds: string[]) => void
   leaveWorktreeIfEmpty: () => void
+  /** Activates a terminal so a bulk close can jump to each busy tab before asking. */
+  revealTerminal: (terminalTabId: string) => void
 }) {
   const closeEmptyGroup = useAppStore((state) => state.closeEmptyGroup)
 
@@ -37,6 +40,7 @@ export function useTabGroupCloseScopeCommands({
     guardBulkTerminalClose({
       worktreeId,
       terminalTabIds: collectBulkTerminalTabIds(useAppStore.getState(), worktreeId, itemIds),
+      revealTab: revealTerminal,
       onProceed: () => {
         for (const itemId of itemIds) {
           closeItem(itemId, { skipEmptyCheck: true, skipRunningProcessConfirm: true })
@@ -46,7 +50,7 @@ export function useTabGroupCloseScopeCommands({
         leaveWorktreeIfEmpty()
       }
     })
-  }, [closeEmptyGroup, closeItem, groupId, leaveWorktreeIfEmpty, worktreeId])
+  }, [closeEmptyGroup, closeItem, groupId, leaveWorktreeIfEmpty, revealTerminal, worktreeId])
 
   const closeAllEditorTabsInGroup = useCallback(() => {
     for (const item of groupTabs) {

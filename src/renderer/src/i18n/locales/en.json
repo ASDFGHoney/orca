@@ -16368,17 +16368,6 @@
         "days": "{{value0}}d",
         "underOneMinute": "<1m"
       }
-    },
-    "terminal": {
-      "pane": {
-        "CloseTerminalDialog": {
-          "stopAgentsTitle": "Stop {{count}} running agents?",
-          "stopCommandsTitle": "Stop {{count}} running commands?",
-          "stopAgentsDescription": "Closing these tabs will stop the agents' current work.",
-          "stopCommandsDescription": "Closing these tabs will stop the commands running inside them.",
-          "moreBusyTabs": "+{{count}} more"
-        }
-      }
     }
   },
   "dashboardPopout": {
