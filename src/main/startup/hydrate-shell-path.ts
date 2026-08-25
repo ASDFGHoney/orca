@@ -33,14 +33,22 @@ export type HydrationResult =
 let cached: Promise<HydrationResult> | null = null
 let probeQueue = Promise.resolve()
 // Why: patchPackagedProcessPath seeds a version manager's newest install dir
-// ahead of PATH before we probe. nvm's startup `use` honors whatever node is
-// already on PATH over the user's `default` alias, so a probe that inherits the
-// seed comes back pinned to that version and every terminal loses the global
-// CLIs installed under `default`. Probe with the launch PATH instead. The key is
-// recorded too because Windows keys it `Path`, and a Git Bash user whose nvm uses
-// the POSIX ~/.nvm/versions/node layout gets a version-pinned seed there as well.
-let launchPath: string | null = null
-let launchPathKey = 'PATH'
+// ahead of PATH. nvm's startup `use` honors whatever node is already on PATH over
+// the user's `default` alias, so a probe inheriting that seed comes back pinned to
+// the newest install and every terminal loses the global CLIs installed under
+// `default`. Snapshot PATH here instead: module init runs while the import graph is
+// evaluated, strictly before any statement in main's body, so it cannot observe the
+// seeds — and unlike an explicit hand-off from the seeding site, there is no call
+// ordering left for a later refactor to break. Windows keys it `Path`, and a Git Bash
+// user whose nvm uses the POSIX ~/.nvm/versions/node layout is seeded there too, so
+// capture the key alongside the value.
+const LAUNCH_PATH_KEY =
+  process.platform === 'win32' && process.env.Path !== undefined ? 'Path' : 'PATH'
+const LAUNCH_PATH = process.env[LAUNCH_PATH_KEY] ?? null
+// Why: rc files that exec into a multiplexer or start a heavy prompt can outrun the
+// probe budget. This lets them detect the probe and take a fast path.
+const PROBE_MARKER_ENV_VAR = 'ORCA_SHELL_PATH_PROBE'
+let launchPathOverride: { key: string; value: string } | null = null
 let configuredWindowsShell = 'powershell.exe'
 let configuredWindowsGitBashPath: string | null = null
 let configuredWindowsFallbackShell: string | null = null
@@ -51,8 +59,7 @@ const windowsPathOwnership = new WindowsShellPathOwnership()
 export function _resetHydrateShellPathCache(): void {
   cached = null
   probeQueue = Promise.resolve()
-  launchPath = null
-  launchPathKey = 'PATH'
+  launchPathOverride = null
   configuredWindowsShell = 'powershell.exe'
   configuredWindowsGitBashPath = null
   configuredWindowsFallbackShell = null
@@ -105,19 +112,21 @@ function parseCapturedPath(stdout: string, pathDelimiter: string = delimiter): s
   ]
 }
 
-/** Records PATH as the process was launched with, before Orca seeds fallbacks onto it. */
-export function recordLaunchPath(pathValue: string, pathKey = 'PATH'): void {
-  launchPath = pathValue
-  launchPathKey = pathKey
+/** @internal - tests need a launch PATH the runner's own environment cannot supply. */
+export function _setLaunchPathForTests(value: string, key = 'PATH'): void {
+  launchPathOverride = { key, value }
 }
 
 function shellProbeEnv(): NodeJS.ProcessEnv {
-  if (launchPath === null) {
-    return process.env
+  const key = launchPathOverride?.key ?? LAUNCH_PATH_KEY
+  const value = launchPathOverride?.value ?? LAUNCH_PATH
+  const env: NodeJS.ProcessEnv = { ...process.env, [PROBE_MARKER_ENV_VAR]: '1' }
+  if (value !== null) {
+    // Why the captured key, not a literal 'PATH': overwrite in place so Windows
+    // never ends up carrying both `Path` and `PATH` on the spawn env.
+    env[key] = value
   }
-  // Why the recorded key, not a literal 'PATH': overwrite the entry in place so
-  // Windows never ends up carrying both `Path` and `PATH`.
-  return { ...process.env, [launchPathKey]: launchPath }
+  return env
 }
 
 function shellPathProbe(shell: string): { args: string[]; pathDelimiter: string } {

@@ -4,7 +4,6 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getVersionManagerBinPaths } from '../codex-cli/command'
 import { getMainE2EConfig } from '../e2e-config'
-import { recordLaunchPath } from './hydrate-shell-path'
 
 const DEV_PARENT_SHUTDOWN_GRACE_MS = 3000
 const HTTP1_COMPATIBILITY_ENV_VAR = 'ORCA_DISABLE_HTTP2'
@@ -140,11 +139,6 @@ export function patchPackagedProcessPath(): void {
 
   const pathKey = process.platform === 'win32' && process.env.Path !== undefined ? 'Path' : 'PATH'
   const currentPath = process.env[pathKey] ?? ''
-  // Why: the login-shell probe must not see the seeds below. nvm's startup
-  // `use` keeps whatever node is already on PATH instead of the user's
-  // `default` alias, so a seeded version dir would pin every terminal to the
-  // newest install and hide global CLIs installed under `default`.
-  recordLaunchPath(currentPath, pathKey)
   const pathDelimiter = getProcessPathDelimiter()
   const existing = new Set(currentPath.split(pathDelimiter))
   const missing = extraPaths.filter((path) => !existing.has(path))
