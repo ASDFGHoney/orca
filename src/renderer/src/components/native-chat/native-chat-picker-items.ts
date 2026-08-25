@@ -35,7 +35,10 @@ export type NativeChatSkillDiscoverySnapshot = {
   errorKind?: 'unavailable' | 'timeout' | 'host' | 'unknown'
 }
 
-const PICKER_RESULT_LIMIT = 50
+// Why: a safety valve against pathological catalogs, not a display policy. The
+// menu scrolls, so a low cap only hid skills — and because rows are scope-sorted,
+// one large scope silently erased every smaller one (#14690).
+const PICKER_RESULT_LIMIT = 500
 const SCOPE_PRIORITY: Record<SkillSourceKind, number> = {
   repo: 0,
   home: 1,
@@ -75,8 +78,46 @@ export function buildNativeChatPickerItems(
   )
   return [
     ...commandItems.slice(0, PICKER_RESULT_LIMIT),
-    ...skillItems.slice(0, PICKER_RESULT_LIMIT)
+    // Ranked results are ordered by relevance, so a plain slice keeps the best
+    // matches; the unfiltered list is scope-ordered and needs a fair budget.
+    ...(query
+      ? skillItems.slice(0, PICKER_RESULT_LIMIT)
+      : limitSkillsAcrossScopes(skillItems, PICKER_RESULT_LIMIT))
   ]
+}
+
+/** Spread the cap across scopes so a large scope cannot evict smaller ones. */
+function limitSkillsAcrossScopes(
+  skills: Extract<NativeChatPickerItem, { kind: 'skill' }>[],
+  limit: number
+): Extract<NativeChatPickerItem, { kind: 'skill' }>[] {
+  if (skills.length <= limit) {
+    return skills
+  }
+  const byScope = new Map<SkillSourceKind, Extract<NativeChatPickerItem, { kind: 'skill' }>[]>()
+  for (const item of skills) {
+    const scope = item.sources[0].sourceKind
+    byScope.set(scope, [...(byScope.get(scope) ?? []), item])
+  }
+  const queues = [...byScope.values()]
+  const picked: Extract<NativeChatPickerItem, { kind: 'skill' }>[] = []
+  for (let depth = 0; picked.length < limit; depth += 1) {
+    let advanced = false
+    for (const queue of queues) {
+      if (picked.length >= limit) {
+        break
+      }
+      const next = queue[depth]
+      if (next) {
+        picked.push(next)
+        advanced = true
+      }
+    }
+    if (!advanced) {
+      break
+    }
+  }
+  return picked.sort(comparePickerSkills)
 }
 
 function mergeNativeChatSkills(
