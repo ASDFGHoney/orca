@@ -4681,6 +4681,7 @@
           "confirmHost": "On {{host}}.",
           "confirmPermanent": "This cannot be undone.",
           "failed": "Could not delete skills",
+          "hostUnavailable": "Could not reach the selected machine. Refresh and try again.",
           "hostUnresolved": "Still finding the machine that owns these skills.",
           "hostUpdateRequired": "Update Orca on the selected machine to delete skills.",
           "nothingOne": "That skill cannot be deleted from here.",

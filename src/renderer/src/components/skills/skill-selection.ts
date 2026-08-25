@@ -11,6 +11,7 @@ import type { DiscoveredSkill } from '../../../../shared/skills'
 export type SkillSelectionPolicy = {
   isEligible: (skill: DiscoveredSkill) => boolean
   collisionKey: (skill: DiscoveredSkill) => string | null
+  maxSelection?: number
 }
 
 function collisionKeys(
@@ -46,7 +47,8 @@ export function eligibleSkillSelectionCount(
     }
     keys.add(key)
   }
-  return keys.size + uncollapsed
+  const count = keys.size + uncollapsed
+  return policy.maxSelection === undefined ? count : Math.min(count, policy.maxSelection)
 }
 
 /** Used by both select-all and shift-range. */
@@ -59,6 +61,9 @@ export function addSelectableSkillResults(
   const next = new Set(current)
   const taken = collisionKeys(skills, current, policy)
   for (const skill of results) {
+    if (policy.maxSelection !== undefined && next.size >= policy.maxSelection) {
+      break
+    }
     if (!policy.isEligible(skill)) {
       continue
     }

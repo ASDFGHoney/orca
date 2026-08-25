@@ -32,6 +32,7 @@ export type SkillDeleteFlow = {
   running: boolean
   result: SkillDeleteResult | null
   dismissResult: () => void
+  reprobe: () => void
   requestDelete: (skills: readonly DiscoveredSkill[]) => Promise<boolean>
 }
 
@@ -55,22 +56,39 @@ export function useSkillDeleteFlow(
 ): SkillDeleteFlow {
   const confirm = useConfirmationDialog()
   const mountedRef = useMountedRef()
-  const [supported, setSupported] = useState(false)
+  const [probeGeneration, setProbeGeneration] = useState(0)
+  const [capability, setCapability] = useState<
+    'checking' | 'supported' | 'unsupported' | 'unavailable'
+  >('checking')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<SkillDeleteResult | null>(null)
 
   useEffect(() => {
     let current = true
-    setSupported(false)
-    void runtimeTargetSupportsSkillDelete(runtimeTarget).then((value) => {
-      if (current && mountedRef.current) {
-        setSupported(value)
-      }
-    })
+    setCapability('checking')
+    const probe = (attempt: number): void => {
+      void runtimeTargetSupportsSkillDelete(runtimeTarget)
+        .then((value) => {
+          if (current && mountedRef.current) {
+            setCapability(value ? 'supported' : 'unsupported')
+          }
+        })
+        .catch(() => {
+          if (!current || !mountedRef.current) {
+            return
+          }
+          if (attempt < 2) {
+            probe(attempt + 1)
+          } else {
+            setCapability('unavailable')
+          }
+        })
+    }
+    probe(0)
     return () => {
       current = false
     }
-  }, [mountedRef, runtimeTarget])
+  }, [mountedRef, probeGeneration, runtimeTarget])
 
   const requestDelete = useCallback(
     async (skills: readonly DiscoveredSkill[]): Promise<boolean> => {
@@ -147,11 +165,13 @@ export function useSkillDeleteFlow(
   )
 
   return {
-    supported,
-    unsupportedReason: supported ? null : unsupportedReason(runtimeTarget),
+    supported: capability === 'supported',
+    unsupportedReason:
+      capability === 'supported' ? null : unsupportedReason(runtimeTarget, capability),
     running,
     result,
     dismissResult: useCallback(() => setResult(null), []),
+    reprobe: useCallback(() => setProbeGeneration((generation) => generation + 1), []),
     requestDelete
   }
 }
@@ -171,9 +191,18 @@ function blockedOnlyResult(plan: SkillDeletePlan): SkillDeleteResult {
   }
 }
 
-function unsupportedReason(runtimeTarget: RuntimeClientTarget | null): string {
+function unsupportedReason(
+  runtimeTarget: RuntimeClientTarget | null,
+  capability: 'checking' | 'supported' | 'unsupported' | 'unavailable'
+): string {
   // The shared constant is the wire-side error text; what the user reads here
   // goes through the catalog like every other string in this panel.
+  if (capability === 'unavailable') {
+    return translate(
+      'auto.components.skills.SkillDelete.hostUnavailable',
+      'Could not reach the selected machine. Refresh and try again.'
+    )
+  }
   return runtimeTarget
     ? translate(
         'auto.components.skills.SkillDelete.hostUpdateRequired',

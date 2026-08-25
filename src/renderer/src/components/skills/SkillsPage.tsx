@@ -6,6 +6,7 @@ import { discoverSkillsForRuntimeTarget } from '@/runtime/runtime-skills-client'
 import { useActiveSkillDiscoveryRuntimeTarget } from '@/hooks/use-active-skill-discovery-runtime-target'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import type { DiscoveredSkill, SkillDiscoveryResult } from '../../../../shared/skills'
+import { MAX_SKILL_DELETE_BATCH } from '../../../../shared/skill-delete-contract'
 import { SkillsList } from './SkillsList'
 import { SkillShareDialog } from './SkillShareDialog'
 import { SkillInstallDialog } from './SkillInstallDialog'
@@ -28,6 +29,7 @@ import { skillAgentByRootPath, skillAgentOptions } from './skill-agent-filter'
 import { SkillSharedLinksView } from './SkillSharedLinksView'
 import { useOwnedSkillShares } from './use-owned-skill-shares'
 import type { SkillsPageView } from './skills-page-view'
+import { useSkillsPageKeyboardNavigation } from './use-skills-page-keyboard-navigation'
 import { translate } from '@/i18n/i18n'
 import {
   INSTALLED_AGENT_SKILLS_CHANGED_EVENT,
@@ -185,64 +187,13 @@ export default function SkillsPage(): React.JSX.Element {
     setFilters(NO_FILTERS)
   }, [])
 
-  useEffect(() => {
-    const hasVisibleOverlay = (): boolean =>
-      Array.from(
-        document.querySelectorAll('[role="dialog"], [role="listbox"], [role="menu"]')
-      ).some((element) => {
-        if (!(element instanceof HTMLElement)) {
-          return false
-        }
-        if (element.closest('[aria-hidden="true"]')) {
-          return false
-        }
-        if (element.closest('[data-skills-page-list="true"]')) {
-          return false
-        }
-        const style = window.getComputedStyle(element)
-        return (
-          style.display !== 'none' &&
-          style.visibility !== 'hidden' &&
-          element.getClientRects().length > 0
-        )
-      })
-
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') {
-        return
-      }
-      // Why: menus and dialogs own Escape before page-level navigation.
-      if (hasVisibleOverlay()) {
-        return
-      }
-      const target = event.target
-      if (
-        target instanceof HTMLElement &&
-        target.matches('input, textarea, select, [contenteditable="true"], [contenteditable=""]')
-      ) {
-        return
-      }
-      event.preventDefault()
-      // Why: leaving the page would silently discard a selection that can hold
-      // dozens of skills, so Escape backs out of the mode first.
-      if (selectionMode) {
-        exitSelection()
-        return
-      }
-      // Why: shared links are a view within the page, so Escape returns to the
-      // skill list before it leaves the page.
-      if (view === 'shared') {
-        exitSharedLinks()
-        return
-      }
-      closeSkillsPage()
-    }
-
-    // Why: tooltips can consume Escape before bubble listeners see it. Capture
-    // keeps page-level back navigation reliable when no overlay is active.
-    window.addEventListener('keydown', handleKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
-  }, [closeSkillsPage, exitSelection, exitSharedLinks, selectionMode, view])
+  useSkillsPageKeyboardNavigation({
+    closeSkillsPage,
+    exitSelection,
+    exitSharedLinks,
+    selectionMode,
+    view
+  })
 
   const skills = result?.skills ?? EMPTY_SKILLS
   const local = runtimeTarget?.kind === 'local'
@@ -348,13 +299,23 @@ export default function SkillsPage(): React.JSX.Element {
         loading={view === 'shared' ? ownedShares.loading : loading}
         onViewChange={(next) => (next === 'shared' ? openSharedLinks() : exitSharedLinks())}
         onFiltersChange={setFilters}
-        onRefresh={() => (view === 'shared' ? ownedShares.refresh() : void loadSkills())}
+        onRefresh={() => {
+          if (view === 'shared') {
+            ownedShares.refresh()
+            return
+          }
+          deleteFlow.reprobe()
+          void loadSkills()
+        }}
       />
       {scanError ? (
         <SkillsScanErrorBand
           message={scanError}
           disabled={loading}
-          onRetry={() => void loadSkills()}
+          onRetry={() => {
+            deleteFlow.reprobe()
+            void loadSkills()
+          }}
         />
       ) : null}
       {deleteFlow.result ? (
@@ -382,7 +343,12 @@ export default function SkillsPage(): React.JSX.Element {
                   deleteUnsupportedReason={deleteFlow.unsupportedReason}
                   onSelectedChange={(skillId, selected) =>
                     setSelectedSkillIds((current) =>
-                      updatedSkillSelection(current, skillId, selected)
+                      updatedSkillSelection(
+                        current,
+                        skillId,
+                        selected,
+                        selectionMode === 'delete' ? MAX_SKILL_DELETE_BATCH : undefined
+                      )
                     )
                   }
                   onSelectResults={(results) =>
@@ -395,7 +361,10 @@ export default function SkillsPage(): React.JSX.Element {
                 <SkillsNoMatchesState onClearFilters={() => setFilters(NO_FILTERS)} />
               ) : (
                 <SkillsEmptyState
-                  onRefresh={() => void loadSkills()}
+                  onRefresh={() => {
+                    deleteFlow.reprobe()
+                    void loadSkills()
+                  }}
                   onInstallFromLink={openInstallDialog}
                 />
               )}

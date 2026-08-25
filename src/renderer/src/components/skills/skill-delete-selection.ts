@@ -1,4 +1,5 @@
 import type { DiscoveredSkill } from '../../../../shared/skills'
+import { MAX_SKILL_DELETE_BATCH } from '../../../../shared/skill-delete-contract'
 import { skillDeletionEligibility } from '../../../../shared/skill-deletion-eligibility'
 import { skillDeleteBlockReasonLabel } from './skill-delete-copy'
 import {
@@ -12,7 +13,8 @@ import {
  *  skills, and both must be independently selectable and reportable. */
 const DELETE_SELECTION_POLICY: SkillSelectionPolicy = {
   isEligible: (skill) => skillDeletionEligibility(skill).deletable,
-  collisionKey: () => null
+  collisionKey: () => null,
+  maxSelection: MAX_SKILL_DELETE_BATCH
 }
 
 export function isSkillDeleteEligible(skill: DiscoveredSkill): boolean {

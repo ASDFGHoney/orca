@@ -16,6 +16,10 @@ import type {
 export const WSL_LIST_ENTRIES_SCRIPT = [
   'set -u',
   'index=0',
+  'for dir in "$@"; do',
+  `  printf 'D\\0%s\\0' "$index"`,
+  '  index=$((index + 1))',
+  '  [ -d "$dir" ] || continue',
   // An unreadable directory must fail the whole call, matching the native
   // listEntries: silently reporting it empty would let the planner treat
   // unenumerated contents as "nothing left here" and remove the parent.
@@ -23,10 +27,6 @@ export const WSL_LIST_ENTRIES_SCRIPT = [
   `    printf 'X\\0'`,
   '    continue',
   '  fi',
-  'for dir in "$@"; do',
-  `  printf 'D\\0%s\\0' "$index"`,
-  '  index=$((index + 1))',
-  '  [ -d "$dir" ] || continue',
   '  for entry in "$dir"/* "$dir"/.*; do',
   '    name=${entry##*/}',
   '    case "$name" in "*"|".*"|"."|"..") continue ;; esac',

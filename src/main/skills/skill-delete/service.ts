@@ -192,8 +192,9 @@ async function runStagedDeletion(
     id: entry.id,
     name: entry.name,
     // Staging fully succeeded, so the skill is gone from every discovered
-    // location — but an unremoved staged path still occupies disk.
-    status: removal.unremoved.length > 0 || !receiptRemoved ? 'partial' : 'deleted',
+    // location. A receipt cleanup failure remains journaled for startup retry,
+    // but does not leave skill content on disk.
+    status: removal.unremoved.length > 0 ? 'partial' : 'deleted',
     removedPaths: sourcePathsFor(moves, removal.removedPaths),
     ...(removal.unremoved.length > 0 ? { stagedPaths: removal.unremoved } : {})
   }
