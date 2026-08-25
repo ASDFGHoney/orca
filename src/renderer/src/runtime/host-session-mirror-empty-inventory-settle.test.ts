@@ -157,6 +157,57 @@ describe('empty host inventory settling the session mirror', () => {
     expect(hasHostSessionMirrorHydrated(environmentId, WORKTREE)).toBe(false)
   })
 
+  it('accepts a legacy zero-terminal result without host scope', async () => {
+    const result = await probeHostLiveTerminals(
+      'env-legacy-zero',
+      vi.fn(async () => ({
+        id: 'legacy-zero',
+        ok: true as const,
+        result: { terminals: [], totalCount: 0, truncated: false },
+        _meta: { runtimeId: 'runtime' }
+      }))
+    )
+
+    expect(result).toBe('none')
+  })
+
+  it('accepts a legacy live result without host scope', async () => {
+    const result = await probeHostLiveTerminals(
+      'env-legacy-live',
+      vi.fn(async () => ({
+        id: 'legacy-live',
+        ok: true as const,
+        result: {
+          terminals: [{ handle: 'terminal-1' }],
+          totalCount: 1,
+          truncated: false
+        },
+        _meta: { runtimeId: 'runtime' }
+      }))
+    )
+
+    expect(result).toBe('live')
+  })
+
+  it('rejects a present malformed host scope as unverifiable', async () => {
+    const result = await probeHostLiveTerminals(
+      'env-malformed-scope',
+      vi.fn(async () => ({
+        id: 'malformed-scope',
+        ok: true as const,
+        result: {
+          terminals: [],
+          totalCount: 0,
+          truncated: false,
+          hostScope: { omittedHostIds: [] }
+        },
+        _meta: { runtimeId: 'runtime' }
+      }))
+    )
+
+    expect(result).toBe('unverifiable')
+  })
+
   it('still settles the environment when the inventory published snapshots', async () => {
     const environmentId = 'env-published'
     const calls = stubPairedHost(['terminal-1'])

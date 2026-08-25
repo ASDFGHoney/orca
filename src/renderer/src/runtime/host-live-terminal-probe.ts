@@ -1,7 +1,4 @@
-import type {
-  RuntimeTerminalListHostScope,
-  RuntimeTerminalListResult
-} from '../../../shared/runtime-types'
+import type { RuntimeTerminalListResult } from '../../../shared/runtime-types'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 
 /**
@@ -24,23 +21,32 @@ type RuntimeCall = (args: {
   timeoutMs: number
 }) => Promise<RuntimeRpcResponse<unknown>>
 
-type CompleteTerminalListResult = RuntimeTerminalListResult & {
+type ValidTerminalListResult = RuntimeTerminalListResult & {
   totalCount: number
-  hostScope: RuntimeTerminalListHostScope
 }
 
 const inFlightProbeByEnvironment = new Map<string, Promise<HostLiveTerminalProbeVerdict>>()
 
-function isTerminalListResult(value: unknown): value is CompleteTerminalListResult {
+function isTerminalListResult(value: unknown): value is ValidTerminalListResult {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !Array.isArray((value as { terminals?: unknown }).terminals) ||
+    !Number.isInteger((value as { totalCount?: unknown }).totalCount) ||
+    (value as { totalCount: number }).totalCount < 0
+  ) {
+    return false
+  }
+  const hostScope = (value as { hostScope?: unknown }).hostScope
+  if (hostScope === undefined) {
+    // Older hosts do not publish scope; preserve their best-effort list result.
+    return true
+  }
   return (
-    Boolean(value) &&
-    typeof value === 'object' &&
-    Array.isArray((value as { terminals?: unknown }).terminals) &&
-    Number.isInteger((value as { totalCount?: unknown }).totalCount) &&
-    (value as { totalCount: number }).totalCount >= 0 &&
-    Boolean((value as { hostScope?: unknown }).hostScope) &&
-    Array.isArray((value as { hostScope?: { hostIds?: unknown } }).hostScope?.hostIds) &&
-    Array.isArray((value as { hostScope?: { omittedHostIds?: unknown } }).hostScope?.omittedHostIds)
+    Boolean(hostScope) &&
+    typeof hostScope === 'object' &&
+    Array.isArray((hostScope as { hostIds?: unknown }).hostIds) &&
+    Array.isArray((hostScope as { omittedHostIds?: unknown }).omittedHostIds)
   )
 }
 
@@ -67,7 +73,8 @@ async function probeHost(
   }
   // An omitted execution host is an incomplete census. In particular, a relay
   // can list its local PTYs while an SSH child host is still starting up.
-  if (response.result.hostScope.omittedHostIds.length > 0) {
+  const hostScope = response.result.hostScope
+  if (hostScope && hostScope.omittedHostIds.length > 0) {
     return 'unverifiable'
   }
   const { terminals, totalCount } = response.result
