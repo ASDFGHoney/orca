@@ -77,15 +77,15 @@ export async function attachStablePaneOwner(
     ) {
       throw new Error('terminal_pane_owner_changed')
     }
-    runtime?.onPtyExit(owner.ptyId, 0, owner.incarnationId)
-    clearProviderPtyState(owner.ptyId)
-    ptyOwnership.delete(owner.ptyId)
     if (
       args.worktreeId &&
       !retirePersistedStablePaneOwner(args.store, owner, args.worktreeId, args.connectionId)
     ) {
       throw new Error('terminal_pane_owner_changed')
     }
+    runtime?.onPtyExit(owner.ptyId, 0, owner.incarnationId)
+    clearProviderPtyState(owner.ptyId)
+    ptyOwnership.delete(owner.ptyId)
     if (args.resolveOwner?.()) {
       throw new Error('terminal_pane_owner_changed')
     }

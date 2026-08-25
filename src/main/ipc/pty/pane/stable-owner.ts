@@ -1,6 +1,9 @@
 import { toSshExecutionHostId } from '../../../../shared/execution-host'
 import { makePaneKey, parsePaneKey } from '../../../../shared/stable-pane-id'
-import type { TerminalOwnerIdentity } from '../../../../shared/terminal-owner-identity'
+import {
+  sameTerminalOwnerIdentity,
+  type TerminalOwnerIdentity
+} from '../../../../shared/terminal-owner-identity'
 import type { Store } from '../../../persistence'
 import { retireTerminalSurfaceFromPersistence } from '../../../runtime/mobile-session-terminal-persistence-retirement'
 import type { OrcaRuntimeService } from '../../../runtime/orca-runtime'
@@ -135,7 +138,14 @@ export function retirePersistedStablePaneOwner(
     // not a competing owner. Reporting failure here strands the pane after its PTY is proven dead.
     return true
   }
-  if (current.ptyId !== owner.ptyId || current.incarnationId !== owner.persistedIncarnationId) {
+  const ownerIdentityMatches = owner.ownerIdentity
+    ? sameTerminalOwnerIdentity(current.ownerIdentity, owner.ownerIdentity)
+    : current.ownerIdentity === undefined
+  if (
+    current.ptyId !== owner.ptyId ||
+    current.incarnationId !== owner.persistedIncarnationId ||
+    !ownerIdentityMatches
+  ) {
     return false
   }
   const session = store.getWorkspaceSession(hostId)
@@ -150,7 +160,12 @@ export function retirePersistedStablePaneOwner(
     return false
   }
   store.setWorkspaceSession(retired, hostId)
-  store.flushOrThrow()
+  try {
+    store.flushOrThrow()
+  } catch (error) {
+    store.setWorkspaceSession(session, hostId)
+    throw error
+  }
   return true
 }
 

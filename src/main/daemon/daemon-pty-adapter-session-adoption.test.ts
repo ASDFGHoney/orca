@@ -216,6 +216,15 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
         snapshot: null
       } as never)
       const legacy = new DaemonPtyAdapter({ socketPath, tokenPath, protocolVersion: 36 })
+      ;(
+        legacy as unknown as {
+          lastAuthenticatedIdentity: { pid: number; startedAtMs: number; launchNonce: string }
+        }
+      ).lastAuthenticatedIdentity = {
+        pid: 42,
+        startedAtMs: 1,
+        launchNonce: 'legacy-owner'
+      }
       vi.spyOn(
         (legacy as unknown as { client: DaemonClient }).client,
         'ensureConnected'
@@ -230,7 +239,15 @@ describe('DaemonPtyAdapter (IPtyProvider)', () => {
             expectedIncarnationId: 'expected-incarnation',
             expectedIncarnationIsAuthoritative: true
           })
-        ).resolves.toMatchObject({ id: 'legacy-owner-session', isReattach: true })
+        ).resolves.toMatchObject({
+          id: 'legacy-owner-session',
+          isReattach: true,
+          ownerIdentity: {
+            ownerIncarnationId: expect.any(String),
+            sessionIncarnationId: 'expected-incarnation',
+            protocolVersion: 36
+          }
+        })
         expect(request).toHaveBeenCalledWith(
           'createOrAttach',
           expect.objectContaining({ attachOnly: true })

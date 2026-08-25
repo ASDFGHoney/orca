@@ -14331,7 +14331,7 @@
       "providers": ["local-daemon", "ssh", "wsl", "remote-runtime"],
       "coveredPlatforms": ["macos", "linux"],
       "coveredProviders": ["local-daemon", "ssh"],
-      "coverageNotes": "Deterministic production-boundary tests cover local daemon routing, pre-side-effect daemon attach fencing, SSH provider/relay incarnation checks, exact relay exit proof, renderer preservation, and guarded recovery. A real macOS multi-generation daemon journey and rendered Docker SSH reconnect journey passed. Paired headed/headless was blocked by missing web-client URL; targeted A/B update handoff, WSL, ConPTY, and physical Windows remain gaps.",
+      "coverageNotes": "Deterministic production-boundary tests cover persisted daemon owner identity, full-owner retirement CAS and rollback, local daemon routing, pre-side-effect daemon attach fencing, SSH provider/relay incarnation checks, exact relay exit proof, renderer preservation, and guarded recovery. A real macOS multi-generation daemon journey and rendered Docker SSH reconnect journey passed. Paired headed/headless was blocked by missing web-client URL; targeted A/B update handoff, WSL, ConPTY, and physical Windows remain gaps.",
       "motivatingLinks": [
         "https://linear.app/stably/issue/STA-5269",
         "https://github.com/stablyai/orca/pull/16152"
@@ -14342,6 +14342,7 @@
         "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-session-owner-authority.oracle.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/daemon/daemon-session-owner-resolution.test.ts src/main/daemon/daemon-pty-router.test.ts src/main/daemon/daemon-pty-router-owner-fencing.test.ts src/main/daemon/daemon-pty-adapter-protocol-compatibility.test.ts src/main/daemon/daemon-pty-adapter-session-adoption.test.ts src/main/daemon/terminal-host.test.ts src/main/daemon/terminal-host-incarnation-fence.test.ts src/main/daemon/degraded-daemon-pty-provider.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty-startup-barrier-and-listing.test.ts src/main/ipc/pty-persisted-incarnation-repair.test.ts src/main/ipc/pty-dead-owner-respawn.test.ts src/main/ipc/pty-controller-spawn-admission.test.ts src/main/agent-hooks/restored-subagent-liveness-sweep.test.ts --reporter=dot",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty/pane/stable-owner-retirement.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/providers/ssh-pty-provider-spawn.test.ts src/main/providers/ssh-pty-provider-reattach-incarnation.test.ts src/relay/pty-handler-attach-replay.test.ts --reporter=dot",
         "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport-spawn-errors.test.ts src/renderer/src/components/terminal-pane/pty-transport-reattach-admission.test.ts src/renderer/src/components/terminal-pane/pty-connection-session-liveness.test.ts src/renderer/src/components/terminal-pane/pty-connection-reattach-binding.test.ts src/renderer/src/components/terminal-pane/pty-connection-direct-ssh-reattach-retry.test.ts src/renderer/src/components/terminal-pane/pty-connection/direct-ssh-reattach-recovery.test.ts --reporter=dot",
         "pnpm exec playwright test tests/e2e/daemon-generation-reconnect-safety.spec.ts tests/e2e/daemon-generation-legacy-close-safety.spec.ts --config tests/playwright.config.ts --project=electron-headless --workers=1",
@@ -14362,6 +14363,7 @@
         "src/main/ipc/pty-persisted-incarnation-repair.test.ts",
         "src/main/ipc/pty-dead-owner-respawn.test.ts",
         "src/main/ipc/pty-controller-spawn-admission.test.ts",
+        "src/main/ipc/pty/pane/stable-owner-retirement.test.ts",
         "src/main/agent-hooks/restored-subagent-liveness-sweep.test.ts",
         "src/main/providers/ssh-pty-provider-spawn.test.ts",
         "src/main/providers/ssh-pty-provider-reattach-incarnation.test.ts",
@@ -14396,6 +14398,13 @@
           "file": "src/main/providers/ssh-pty-provider-reattach-incarnation.test.ts",
           "assertions": [
             "relay absence and missing replay continuity remain unverifiable while exact matched process death is exited"
+          ]
+        },
+        {
+          "file": "src/main/ipc/pty/pane/stable-owner-retirement.test.ts",
+          "assertions": [
+            "retirement compares the full persisted owner tuple before deleting topology",
+            "a failed durable flush restores topology and preserves runtime owner state"
           ]
         },
         {
@@ -14479,6 +14488,15 @@
           "summary": "Six renderer files passed 65 liveness, typed-result, topology-preservation, and bounded recovery tests."
         },
         {
+          "date": "2026-08-25",
+          "runner": "local",
+          "platform": "macos",
+          "result": "passed",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty/pane/stable-owner-retirement.test.ts --reporter=dot",
+          "durationSeconds": 0.66,
+          "summary": "Three focused contracts passed full-owner retirement CAS, durable-flush rollback, and runtime-state preservation."
+        },
+        {
           "date": "2026-08-23",
           "runner": "local",
           "platform": "macos",
@@ -14519,7 +14537,7 @@
         "Collect 100 consecutive focused CI passes or 14 days without an unexplained flake."
       ],
       "knownGaps": [
-        "Persisted daemon owner-incarnation identity is not yet implemented; the immediate guard uses exact in-process routes plus session incarnations and fails closed when the route is missing.",
+        "Direct SSH, relay, and paired-runtime bindings do not yet persist the complete owner-incarnation tuple; they remain session-incarnation fenced and fail closed when exact authority is unavailable.",
         "A current client can reattach a persisted-incarnation session through a surviving v31-v36 daemon and validates its returned incarnation, but those owners cannot reject an incarnation mismatch before attach-side replay or subscription changes.",
         "Pre-incarnation daemon events cannot authoritatively settle a saved session; anonymous exits remain unverifiable and may leave a dead legacy pane visible until the user closes it.",
         "A pre-fence SSH relay can ignore the optional expected incarnation and mutate delivery before a current client rejects its response; capability negotiation remains permanent-boundary work.",
