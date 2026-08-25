@@ -1,5 +1,6 @@
 import { useAppStore } from '@/store'
 import {
+  getEffectiveAgentHibernationIdleMs,
   planAgentHibernationCandidates,
   type AgentHibernationCandidate,
   type AgentHibernationPlannerSnapshot
@@ -15,6 +16,11 @@ import {
   getForegroundTerminalTabLastSeenAtById
 } from './foreground-terminal-tabs'
 import { getAgentHibernationOutputSignature } from './agent-hibernation-output-activity'
+import {
+  getHibernationBoundaryResolvedAtByPaneKey,
+  getHibernationPtyBindingFirstSeenAtByPaneKey,
+  observeHibernationPtyBindings
+} from './agent-hibernation-pane-age'
 import { mergePendingTerminalInputActivity } from './terminal-input-activity-coalescing'
 import { getRuntimeEnvironmentIdForWorktree } from './worktree-runtime-owner'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
@@ -78,6 +84,8 @@ function snapshotFromState(
       state.lastTerminalInputAtByPaneKey
     ),
     foregroundTerminalLastSeenAtByTabId: getForegroundTerminalTabLastSeenAtById(),
+    ptyBindingFirstSeenAtByPaneKey: getHibernationPtyBindingFirstSeenAtByPaneKey(),
+    boundaryResolvedAtByPaneKey: getHibernationBoundaryResolvedAtByPaneKey(),
     now
   }
 }
@@ -147,6 +155,14 @@ async function collectRuntimePtyLiveness(state: AppState): Promise<RuntimePtyLiv
 async function currentCandidates(now: number) {
   const runtimeLiveness = await collectRuntimePtyLiveness(useAppStore.getState())
   const freshState = useAppStore.getState()
+  // Why: age the PTY bindings from the same state the plan is built from, so a pane
+  // observed for the first time this pass cannot also be judged long-idle in it.
+  observeHibernationPtyBindings({
+    tabsByWorktree: freshState.tabsByWorktree,
+    terminalLayoutsByTabId: freshState.terminalLayoutsByTabId,
+    now,
+    idleMs: getEffectiveAgentHibernationIdleMs(freshState.settings?.agentHibernationIdleMs)
+  })
   return planAgentHibernationCandidates(snapshotFromState(freshState, now, runtimeLiveness))
     .filter((candidate) => {
       const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(

@@ -20,6 +20,10 @@ import {
   recordAgentHibernationPaneOutput,
   resetAgentHibernationOutputActivityForTests
 } from './agent-hibernation-output-activity'
+import {
+  observeHibernationPtyBindings,
+  resetHibernationPaneAgeForTests
+} from './agent-hibernation-pane-age'
 import { createCompatibleRuntimeStatusResponseIfNeeded } from '../runtime/runtime-compatibility-test-fixture'
 import { clearRuntimeCompatibilityCacheForTests } from '../runtime/runtime-rpc-client'
 import type { AppState } from '@/store/types'
@@ -104,6 +108,17 @@ function installEligibleState(
     shutdownWorktreeTerminals: vi.fn() as never,
     ...overrides
   })
+  // Why: a pane idle long enough to hibernate has necessarily been observed by earlier
+  // coordinator passes, so its PTY binding is old. Seed that here — otherwise the
+  // binding-age floor (which exists to stop a wake or app restart sleeping the whole
+  // backlog immediately) would defer every candidate on its first observed tick.
+  const state = useAppStore.getState()
+  observeHibernationPtyBindings({
+    tabsByWorktree: state.tabsByWorktree,
+    terminalLayoutsByTabId: state.terminalLayoutsByTabId,
+    now: NOW - DEFAULT_AGENT_HIBERNATION_IDLE_MS - 60_000,
+    idleMs: DEFAULT_AGENT_HIBERNATION_IDLE_MS
+  })
   return shutdownCompletedAgentPaneForHibernation
 }
 
@@ -177,6 +192,7 @@ afterEach(() => {
   clearRuntimeCompatibilityCacheForTests()
   resetForegroundTerminalTabIdsForTests()
   resetAgentHibernationOutputActivityForTests()
+  resetHibernationPaneAgeForTests()
   hydrateDrivers([])
   mockRuntimeEnvironmentCall.mockReset()
   vi.useRealTimers()
