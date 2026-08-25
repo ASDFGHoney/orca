@@ -5,8 +5,8 @@ import type {
   WorktreePollerWindowVisibility
 } from './worktree-base-directory-poller'
 import { startGitCommonNarrowWatch } from './worktree-git-common-narrow-watch'
+import { startGitCommonPrimaryWatch } from './worktree-git-common-primary-watch'
 import { startGitCommonPolling } from './worktree-git-common-polling'
-import { startGitCommonPrimaryPolling } from './worktree-git-common-primary-polling'
 
 // Watches a repo's `<common>/.git/worktrees` metadata plus the primary
 // checkout's shallow branch/index files — the only paths the git-common event
@@ -29,28 +29,30 @@ export async function startGitCommonWatch(
   getStatusRefPaths: () => readonly string[] = () => [],
   onWatchError?: (error: Error) => void
 ): Promise<WorktreeBaseSubscription> {
-  if (platform === 'darwin') {
-    const [narrowWatch, primaryMetadataPoll] = await Promise.all([
+  if (supportsNarrowWatch(platform)) {
+    const [narrowWatch, primaryWatch] = await Promise.all([
       startGitCommonNarrowWatch(
         target,
         onEvents,
         pollIntervalMs,
+        platform,
         visibility,
         onFullScan,
         onWatchError
       ),
-      startGitCommonPrimaryPolling(
+      startGitCommonPrimaryWatch(
         target.path,
         getStatusRefPaths,
         onEvents,
         pollIntervalMs,
         visibility,
-        onFullScan
+        onFullScan,
+        onWatchError
       )
     ])
     return {
       unsubscribe: async () => {
-        await Promise.all([narrowWatch.unsubscribe(), primaryMetadataPoll.unsubscribe()])
+        await Promise.all([narrowWatch.unsubscribe(), primaryWatch.unsubscribe()])
       }
     }
   }

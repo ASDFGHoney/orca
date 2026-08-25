@@ -100,7 +100,7 @@ type ChildSubscription = {
   unsubscribe: ReturnType<typeof vi.fn<() => Promise<void>>>
 }
 
-describe('worktree git-common narrow watch (darwin)', () => {
+describe('worktree git-common narrow watch (local native platforms)', () => {
   const cleanups: (() => Promise<void>)[] = []
   const subscribeMock = vi.mocked(subscribeViaWatcherProcess)
   let childSubscriptions: ChildSubscription[] = []
@@ -118,6 +118,26 @@ describe('worktree git-common narrow watch (darwin)', () => {
       childSubscriptions.push({ dir, callback, hooks, unsubscribe })
       return { unsubscribe }
     })
+  }
+
+  function narrowSubscriptions(): ChildSubscription[] {
+    return childSubscriptions.filter((subscription) => subscription.dir.endsWith('worktrees'))
+  }
+
+  function narrowSubscription(): ChildSubscription {
+    const subscription = narrowSubscriptions()[0]
+    if (!subscription) {
+      throw new Error('narrow watcher subscription not installed')
+    }
+    return subscription
+  }
+
+  function primarySubscription(): ChildSubscription {
+    const subscription = childSubscriptions.find((item) => !item.dir.endsWith('worktrees'))
+    if (!subscription) {
+      throw new Error('primary watcher subscription not installed')
+    }
+    return subscription
   }
 
   async function makeCommonDir(withWorktrees: boolean): Promise<string> {
@@ -143,13 +163,14 @@ describe('worktree git-common narrow watch (darwin)', () => {
     commonDir: string,
     received: WorktreeBasePollEvent[][],
     getStatusRefPaths: () => readonly string[] = () => [],
-    onWatchError?: (error: Error) => void
+    onWatchError?: (error: Error) => void,
+    platform: NodeJS.Platform = 'darwin'
   ): Promise<void> {
     const watch = await startGitCommonWatch(
       makeTarget(commonDir),
       (events) => received.push(events),
       POLL_MS,
-      'darwin',
+      platform,
       alwaysVisible,
       undefined,
       getStatusRefPaths,
@@ -164,20 +185,38 @@ describe('worktree git-common narrow watch (darwin)', () => {
     const received: WorktreeBasePollEvent[][] = []
     await startWatch(commonDir, received)
 
-    expect(subscribeMock).toHaveBeenCalledTimes(1)
-    const [dir, , opts] = subscribeMock.mock.calls[0]
-    expect(dir).toBe(join(commonDir, 'worktrees'))
-    expect(opts).toEqual({})
+    expect(subscribeMock).toHaveBeenCalledTimes(2)
+    const narrowCall = subscribeMock.mock.calls.find(
+      ([dir]) => dir === join(commonDir, 'worktrees')
+    )
+    expect(narrowCall?.[0]).toBe(join(commonDir, 'worktrees'))
+    expect(narrowCall?.[2]).toEqual({})
 
     const entryPath = join(commonDir, 'worktrees', 'wt-a')
-    childSubscriptions[0].callback(null, [{ type: 'create', path: entryPath }])
+    narrowSubscription().callback(null, [{ type: 'create', path: entryPath }])
     expect(received.flat()).toContainEqual({ type: 'create', path: entryPath })
   })
 
-  it('detects a common config write via the primary-metadata poll', async () => {
+  it.each(['linux', 'win32'] as const)(
+    'uses the crash-isolated narrow stream on %s',
+    async (platform) => {
+      installSubscribeMock()
+      const commonDir = await makeCommonDir(true)
+      const received: WorktreeBasePollEvent[][] = []
+      await startWatch(commonDir, received, undefined, undefined, platform)
+
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
+      const narrowCall = subscribeMock.mock.calls.find(([dir]) => dir.endsWith('worktrees'))
+      expect(narrowCall?.[2]).toEqual(platform === 'win32' ? { backend: 'windows' } : {})
+      const entryPath = join(commonDir, 'worktrees', `${platform}-entry`)
+      narrowSubscription().callback(null, [{ type: 'create', path: entryPath }])
+      expect(received.flat()).toContainEqual({ type: 'create', path: entryPath })
+    }
+  )
+
+  it('detects a common config write via the shallow primary-metadata watcher', async () => {
     // Why: an external `git push -u` rewrites only the common config (plus
-    // remote-tracking refs) — outside the narrow worktrees/ stream, so the
-    // primary-metadata poll must carry it.
+    // remote-tracking refs) — outside the narrow worktrees/ stream.
     installSubscribeMock()
     const commonDir = await makeCommonDir(true)
     const configPath = join(commonDir, 'config')
@@ -186,9 +225,29 @@ describe('worktree git-common narrow watch (darwin)', () => {
     await startWatch(commonDir, received)
 
     await appendFile(configPath, '[branch "main"]\n\tremote = origin\n')
+    primarySubscription().callback(null, [{ type: 'update', path: configPath }])
     await vi.waitFor(() => {
       expect(received.flat()).toContainEqual({ type: 'update', path: configPath })
     })
+  })
+
+  it('leaves primary metadata stats to the shallow child on the healthy path', async () => {
+    installSubscribeMock()
+    const commonDir = await makeCommonDir(true)
+    const headPath = join(commonDir, 'HEAD')
+    const configPath = join(commonDir, 'config')
+    await Promise.all([
+      writeFile(headPath, 'ref: refs/heads/main'),
+      writeFile(configPath, '[core]\n')
+    ])
+    statCalls.length = 0
+
+    const received: WorktreeBasePollEvent[][] = []
+    await startWatch(commonDir, received)
+
+    expect(statCalls).not.toContain(headPath)
+    expect(statCalls).not.toContain(configPath)
+    expect(primarySubscription().dir).toBe(commonDir)
   })
 
   it('polls only the accepted upstream ref and rebinds without synthetic events', async () => {
@@ -234,16 +293,16 @@ describe('worktree git-common narrow watch (darwin)', () => {
     await startWatch(commonDir, received)
 
     await rm(worktreesDir, { recursive: true, force: true })
-    childSubscriptions[0].callback(null, [{ type: 'delete', path: worktreesDir }])
+    narrowSubscription().callback(null, [{ type: 'delete', path: worktreesDir }])
     await vi.waitFor(() => {
-      expect(childSubscriptions[0].unsubscribe).toHaveBeenCalledTimes(1)
+      expect(narrowSubscription().unsubscribe).toHaveBeenCalledTimes(1)
     })
     expect(received.flat()).toContainEqual({ type: 'delete', path: worktreesDir })
 
     // The existence poll re-subscribes once a new first worktree recreates it.
     await mkdir(worktreesDir)
     await vi.waitFor(() => {
-      expect(subscribeMock).toHaveBeenCalledTimes(2)
+      expect(subscribeMock).toHaveBeenCalledTimes(3)
     })
     expect(received.flat()).toContainEqual({ type: 'create', path: worktreesDir })
   })
@@ -255,28 +314,28 @@ describe('worktree git-common narrow watch (darwin)', () => {
     const received: WorktreeBasePollEvent[][] = []
     await startWatch(commonDir, received)
 
-    childSubscriptions[0].callback(new Error('watcher child reported failure'), [])
+    narrowSubscription().callback(new Error('watcher child reported failure'), [])
     await vi.waitFor(() => {
-      expect(childSubscriptions[0].unsubscribe).toHaveBeenCalledTimes(1)
+      expect(narrowSubscription().unsubscribe).toHaveBeenCalledTimes(1)
     })
     // The error is surfaced as a structural change so worktrees re-sync.
     expect(received.flat()).toContainEqual({ type: 'update', path: worktreesDir })
 
     // The dir still exists, so the existence poll re-subscribes.
     await vi.waitFor(() => {
-      expect(subscribeMock).toHaveBeenCalledTimes(2)
+      expect(subscribeMock).toHaveBeenCalledTimes(3)
     })
 
     const receivedAfterRearm = received.length
-    childSubscriptions[0].callback(new Error('late error from replaced watcher'), [])
-    childSubscriptions[0].callback(null, [
+    narrowSubscription().callback(new Error('late error from replaced watcher'), [])
+    narrowSubscription().callback(null, [
       { type: 'create', path: join(worktreesDir, 'late-old-event') }
     ])
-    childSubscriptions[0].hooks.onInterruption?.()
+    narrowSubscription().hooks.onInterruption?.()
 
     // A replaced watch cannot tear down its successor or report stale events.
     expect(received).toHaveLength(receivedAfterRearm)
-    expect(childSubscriptions[1].unsubscribe).not.toHaveBeenCalled()
+    expect(narrowSubscriptions()[1].unsubscribe).not.toHaveBeenCalled()
   })
 
   it('routes watcher failures through the unknown-metadata callback', async () => {
@@ -287,7 +346,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
     await startWatch(commonDir, received, () => [], onWatchError)
 
     const error = new Error('watcher child reported failure')
-    childSubscriptions[0].callback(error, [])
+    narrowSubscription().callback(error, [])
 
     expect(onWatchError).toHaveBeenCalledWith(error)
     expect(received).toEqual([])
@@ -307,7 +366,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
       visibility.source
     )
 
-    childSubscriptions[0].callback(
+    narrowSubscription().callback(
       new WatcherProcessFailure(
         'watcher process crashed repeatedly',
         'supervisor',
@@ -316,7 +375,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
       []
     )
     await vi.waitFor(() => {
-      expect(childSubscriptions[0].unsubscribe).toHaveBeenCalledOnce()
+      expect(narrowSubscription().unsubscribe).toHaveBeenCalledOnce()
       expect(visibility.listenerCount()).toBe(3)
     })
 
@@ -329,7 +388,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
     await vi.waitFor(() => {
       expect(received.flat()).toContainEqual({ type: 'delete', path: entryPath })
     })
-    expect(subscribeMock).toHaveBeenCalledOnce()
+    expect(subscribeMock).toHaveBeenCalledTimes(2)
     await watch.unsubscribe()
     expect(visibility.listenerCount()).toBe(0)
   })
@@ -356,7 +415,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
       expect(received.flat()).toContainEqual({ type: 'create', path: entryPath })
     })
     await new Promise((resolve) => setTimeout(resolve, POLL_MS * 2))
-    expect(subscribeMock).toHaveBeenCalledOnce()
+    expect(subscribeMock).toHaveBeenCalledTimes(2)
 
     await watch.unsubscribe()
     expect(visibility.listenerCount()).toBe(0)
@@ -369,10 +428,10 @@ describe('worktree git-common narrow watch (darwin)', () => {
     const received: WorktreeBasePollEvent[][] = []
     await startWatch(commonDir, received)
 
-    childSubscriptions[0].hooks.onInterruption?.()
+    narrowSubscription().hooks.onInterruption?.()
     expect(received.flat()).toContainEqual({ type: 'update', path: worktreesDir })
     // The supervisor resubscribed the same record; no teardown should happen.
-    expect(childSubscriptions[0].unsubscribe).not.toHaveBeenCalled()
+    expect(narrowSubscription().unsubscribe).not.toHaveBeenCalled()
   })
 
   it('arms via existence polling when the worktrees dir appears later', async () => {
@@ -380,7 +439,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
     const commonDir = await makeCommonDir(false)
     const received: WorktreeBasePollEvent[][] = []
     await startWatch(commonDir, received)
-    expect(subscribeMock).not.toHaveBeenCalled()
+    expect(subscribeMock).toHaveBeenCalledTimes(1)
 
     await mkdir(join(commonDir, 'worktrees'))
     await vi.waitFor(() => {
@@ -418,7 +477,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
     await new Promise((resolve) => setTimeout(resolve, POLL_MS * 4))
 
     expect(statCalls.filter((path) => path === worktreesDir)).toHaveLength(0)
-    expect(subscribeMock).not.toHaveBeenCalled()
+    expect(subscribeMock).toHaveBeenCalledTimes(1)
     expect(received.flat()).toHaveLength(0)
   })
 
@@ -429,13 +488,13 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
     await mkdir(worktreesDir)
     await new Promise((resolve) => setTimeout(resolve, POLL_MS * 4))
-    expect(subscribeMock).not.toHaveBeenCalled()
+    expect(subscribeMock).toHaveBeenCalledTimes(1)
 
     visibility.show()
     // Promptly: the re-check stats on show, not a poll interval later.
     expect(statCalls.filter((path) => path === worktreesDir)).toHaveLength(1)
     await vi.waitFor(() => {
-      expect(subscribeMock).toHaveBeenCalledTimes(1)
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
     })
     expect(received.flat()).toContainEqual({ type: 'create', path: worktreesDir })
   })
@@ -469,7 +528,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
 
     await mkdir(worktreesDir)
     await vi.waitFor(() => {
-      expect(subscribeMock).toHaveBeenCalledTimes(1)
+      expect(subscribeMock).toHaveBeenCalledTimes(2)
     })
     expect(received.flat()).toContainEqual({ type: 'create', path: worktreesDir })
   })
@@ -486,7 +545,7 @@ describe('worktree git-common narrow watch (darwin)', () => {
       visibility.source
     )
 
-    // Narrow watch + primary-metadata poll each park on window visibility.
+    // Narrow existence + selected-ref polling each park on window visibility.
     expect(visibility.listenerCount()).toBe(2)
     await watch.unsubscribe()
     expect(visibility.listenerCount()).toBe(0)
@@ -513,19 +572,16 @@ describe('worktree git-common narrow watch (darwin)', () => {
     visibility.hide()
     await new Promise((resolve) => setTimeout(resolve, POLL_MS * 2))
     await writeFile(headFile, 'ref: refs/heads/feature')
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS * 2))
+    primarySubscription().callback(null, [{ type: 'update', path: headFile }])
 
     expect(fullScans).toHaveLength(0)
     const entryPath = join(commonDir, 'worktrees', 'native-while-hidden')
-    childSubscriptions[0].callback(null, [{ type: 'create', path: entryPath }])
+    narrowSubscription().callback(null, [{ type: 'create', path: entryPath }])
     expect(received.flat()).toContainEqual({ type: 'create', path: entryPath })
-    expect(childSubscriptions[0].unsubscribe).not.toHaveBeenCalled()
+    expect(narrowSubscription().unsubscribe).not.toHaveBeenCalled()
 
     visibility.show()
-    expect(fullScans).toHaveLength(1)
-    await vi.waitFor(() => {
-      expect(received.flat()).toContainEqual({ type: 'update', path: headFile })
-    })
+    expect(fullScans).toHaveLength(0)
   })
 
   it('re-arms the native stream when the root is replaced with the same child names', async () => {
@@ -641,17 +697,17 @@ describe('worktree git-common narrow watch (darwin)', () => {
       alwaysVisible
     )
     await watch.unsubscribe()
-    expect(childSubscriptions[0].unsubscribe).toHaveBeenCalledTimes(1)
+    expect(narrowSubscription().unsubscribe).toHaveBeenCalledTimes(1)
 
     received.length = 0
-    childSubscriptions[0].callback(null, [
+    narrowSubscription().callback(null, [
       { type: 'create', path: join(commonDir, 'worktrees', 'late') }
     ])
     expect(received).toHaveLength(0)
   })
 })
 
-describe('worktree git-common polling gate (non-darwin)', () => {
+describe('worktree git-common polling gate (unsupported platform)', () => {
   const cleanups: (() => Promise<void>)[] = []
 
   afterEach(async () => {
@@ -686,7 +742,7 @@ describe('worktree git-common polling gate (non-darwin)', () => {
       makePollingTarget(commonDir),
       (events) => received.push(events),
       POLL_MS,
-      'linux',
+      'freebsd',
       visibility,
       onFullScan,
       getStatusRefPaths
