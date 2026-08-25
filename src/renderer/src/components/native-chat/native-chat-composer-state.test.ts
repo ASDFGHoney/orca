@@ -321,9 +321,9 @@ describe('native skill and command picker', () => {
     ]
     const names = buildNativeChatPickerItems([], skills, '', '/').map((item) => item.name)
     expect(names).toHaveLength(500)
-    expect(names).toContain('home-skill-0')
-    expect(names).toContain('home-skill-1')
-    expect(names).toContain('home-skill-2')
+    // Budgeted rows still land in scope order, so the home rows sort last.
+    expect(names.slice(-3)).toEqual(['home-skill-0', 'home-skill-1', 'home-skill-2'])
+    expect(names.slice(0, -3).every((name) => name.startsWith('repo-skill-'))).toBe(true)
   })
 
   it('keeps a queried catalog in rank order rather than spreading it across scopes', () => {
