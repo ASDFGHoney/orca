@@ -20,9 +20,11 @@ describe('window-close-request-coordinator', () => {
     confirmWindowClose.mockClear()
     // Why: dispatch falls back to the preload bridge when no rich handler is
     // registered; stub just the surface it touches.
-    ;(
-      globalThis as unknown as { window: { api: { ui: { confirmWindowClose: () => void } } } }
-    ).window = { api: { ui: { confirmWindowClose } } }
+    const windowTarget = new EventTarget() as EventTarget & {
+      api: { ui: { confirmWindowClose: () => void } }
+    }
+    windowTarget.api = { ui: { confirmWindowClose } }
+    ;(globalThis as unknown as { window: typeof windowTarget }).window = windowTarget
   })
 
   afterEach(() => {
@@ -53,6 +55,20 @@ describe('window-close-request-coordinator', () => {
     await dispatchWindowCloseRequest({ isQuitting: true })
 
     expect(confirmWindowClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs the Terminal-less close checkpoint in the degradable close scope', async () => {
+    const beforeUnload = vi.fn((event: Event) => {
+      expect(isWindowCloseCheckpointInProgress()).toBe(true)
+      event.preventDefault()
+    })
+    window.addEventListener('beforeunload', beforeUnload, { once: true })
+
+    await dispatchWindowCloseRequest({ isQuitting: true })
+
+    expect(beforeUnload).toHaveBeenCalledTimes(1)
+    expect(confirmWindowClose).not.toHaveBeenCalled()
+    expect(isWindowCloseCheckpointInProgress()).toBe(false)
   })
 
   it('delegates to the rich handler and does NOT confirm directly when one is registered', async () => {

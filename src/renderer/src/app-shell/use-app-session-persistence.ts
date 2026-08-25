@@ -121,42 +121,44 @@ export function useAppSessionPersistence(): void {
     // two firings, PTY exit events can arrive and unmount TerminalPanes,
     // emptying shutdownBufferCaptures. The guard prevents the second call
     // from overwriting the good session data with an empty snapshot.
-    const shutdownCheckpoint = createShutdownCheckpointGuard(
-      createShutdownCheckpointPersist({
-        shouldCaptureSession: () => shouldPersistWorkspaceSession(useAppStore.getState()),
-        captureTerminalBuffers: () => {
-          for (const capture of shutdownBufferCaptures.values()) {
-            try {
-              capture({ includeLocalBuffers: false })
-            } catch {
-              // Don't let one pane's failure block the rest.
-            }
+    const shutdownCheckpointPersist = createShutdownCheckpointPersist({
+      shouldCaptureSession: () => shouldPersistWorkspaceSession(useAppStore.getState()),
+      captureTerminalBuffers: () => {
+        for (const capture of shutdownBufferCaptures.values()) {
+          try {
+            capture({ includeLocalBuffers: false })
+          } catch {
+            // Don't let one pane's failure block the rest.
           }
-        },
-        // Why: agent provider session ids live only in agentStatusByPaneKey,
-        // which is in-memory. Capture them into the persisted sleeping-session
-        // map so a daemon/session death while the app is closed can still
-        // cold-restore via the agent's resume command (#5232).
-        captureSleepingAgentSessions: () =>
-          useAppStore.getState().captureAllSleepingAgentSessions('quit'),
-        // Why: re-read state after capture() calls populated scrollback buffers
-        // into the store via Zustand setters. The shouldCaptureSession read is
-        // only for the gating flags and would miss those updates.
-        buildSessionSnapshots: () => {
-          const freshState = useAppStore.getState()
-          return buildWorkspaceSessionHostSnapshots(
-            buildWorkspaceSessionPayload(freshState),
-            freshState
-          )
-        },
-        buildUiPatch: () => buildActiveViewUnloadPatch(useAppStore.getState()),
-        hasDirtyOpenFiles: () => useAppStore.getState().openFiles.some((file) => file.isDirty),
-        // Why: an app-level quit degrades too — the pre-fix alternative was a quit
-        // the user could only complete with SIGKILL, which loses strictly more (#15352).
-        isDegradableShutdownInProgress: () =>
-          isIntentionalAppRestartInProgress() || isWindowCloseCheckpointInProgress(),
-        stageBeforeUnloadSync: (args) => window.api.app.stageBeforeUnloadSync(args)
-      })
+        }
+      },
+      // Why: agent provider session ids live only in agentStatusByPaneKey,
+      // which is in-memory. Capture them into the persisted sleeping-session
+      // map so a daemon/session death while the app is closed can still
+      // cold-restore via the agent's resume command (#5232).
+      captureSleepingAgentSessions: () =>
+        useAppStore.getState().captureAllSleepingAgentSessions('quit'),
+      // Why: re-read state after capture() calls populated scrollback buffers
+      // into the store via Zustand setters. The shouldCaptureSession read is
+      // only for the gating flags and would miss those updates.
+      buildSessionSnapshots: () => {
+        const freshState = useAppStore.getState()
+        return buildWorkspaceSessionHostSnapshots(
+          buildWorkspaceSessionPayload(freshState),
+          freshState
+        )
+      },
+      buildUiPatch: () => buildActiveViewUnloadPatch(useAppStore.getState()),
+      hasDirtyOpenFiles: () => useAppStore.getState().openFiles.some((file) => file.isDirty),
+      // Why: an app-level quit degrades too — the pre-fix alternative was a quit
+      // the user could only complete with SIGKILL, which loses strictly more (#15352).
+      isDegradableShutdownInProgress: () =>
+        isIntentionalAppRestartInProgress() || isWindowCloseCheckpointInProgress(),
+      stageBeforeUnloadSync: (args) => window.api.app.stageBeforeUnloadSync(args)
+    })
+    const shutdownCheckpoint = createShutdownCheckpointGuard(
+      shutdownCheckpointPersist.run,
+      shutdownCheckpointPersist.reset
     )
     const persistBeforeUnload = createShutdownCheckpointBeforeUnloadHandler(shutdownCheckpoint)
     window.addEventListener('beforeunload', persistBeforeUnload)

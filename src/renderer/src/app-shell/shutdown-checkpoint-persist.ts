@@ -1,4 +1,5 @@
 import type { PersistedUIState } from '../../../shared/persisted-ui-state-types'
+import { formatShutdownCheckpointFailureReason } from '../../../shared/renderer-shutdown-events'
 import type { WorkspaceSessionHostSnapshot } from '../lib/workspace-session-host-persistence'
 import { recordRendererCrashBreadcrumb } from '../lib/crash-breadcrumb-recorder'
 
@@ -21,16 +22,23 @@ export type ShutdownCheckpointPersistDeps = {
   stageBeforeUnloadSync: (args: ShutdownCheckpointStageArgs) => void
 }
 
-/** Returns the synchronous body of the shutdown checkpoint: capture renderer-owned
- *  state, then stage everything durable through one main-process call. Throwing
- *  fails the checkpoint and blocks the restart, so only unstageable data may throw.
+export type ShutdownCheckpointPersist = {
+  run: () => void
+  reset: () => void
+}
+
+/** Returns the shutdown checkpoint attempt lifecycle. Running it captures renderer-owned
+ *  state, then stages everything durable through one main-process call; reset discards
+ *  retry state when that shutdown attempt is abandoned. Only unstageable data may throw.
  *
  *  A factory rather than a bare function so full-session staging failures can stay
  *  visible-and-retryable on the first attempt and only degrade on a repeat: a
  *  transient failure gets its retry, a deterministic one can't strand the user. */
-export function createShutdownCheckpointPersist(deps: ShutdownCheckpointPersistDeps): () => void {
+export function createShutdownCheckpointPersist(
+  deps: ShutdownCheckpointPersistDeps
+): ShutdownCheckpointPersist {
   let fullStagingFailedOnPriorAttempt = false
-  return (): void => {
+  const run = (): void => {
     const shouldCaptureSession = deps.shouldCaptureSession()
     if (shouldCaptureSession) {
       deps.captureTerminalBuffers()
@@ -43,7 +51,7 @@ export function createShutdownCheckpointPersist(deps: ShutdownCheckpointPersistD
         // alternative (no update, or a SIGKILL'd quit losing the whole snapshot).
         console.error('[app] Sleeping-agent quit capture failed; continuing checkpoint', error)
         recordRendererCrashBreadcrumb('renderer_shutdown_sleeping_capture_failed', {
-          message: error instanceof Error ? error.message : String(error)
+          message: formatShutdownCheckpointFailureReason(error)
         })
       }
     }
@@ -91,5 +99,11 @@ export function createShutdownCheckpointPersist(deps: ShutdownCheckpointPersistD
       deps.stageBeforeUnloadSync({ sessions: [], ui: deps.buildUiPatch() })
     }
     fullStagingFailedOnPriorAttempt = false
+  }
+  return {
+    run,
+    reset: () => {
+      fullStagingFailedOnPriorAttempt = false
+    }
   }
 }

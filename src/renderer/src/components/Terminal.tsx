@@ -539,7 +539,13 @@ function Terminal(): React.JSX.Element | null {
       // no reason — its deferred dialog flow already gives the user a surface.
       const reason = consumeShutdownCheckpointFailureReason()
       if (reason) {
-        toast.error(`Quit canceled: the session snapshot could not be saved (${reason}).`)
+        toast.error(
+          translate(
+            'auto.components.Terminal.quitSnapshotSaveFailed',
+            'Quit canceled: the session snapshot could not be saved ({{value0}}).',
+            { value0: reason }
+          )
+        )
       }
       return
     }

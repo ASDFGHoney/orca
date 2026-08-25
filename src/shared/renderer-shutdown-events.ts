@@ -9,6 +9,14 @@ export const ORCA_RENDERER_SHUTDOWN_CHECKPOINT_FAILED_EVENT =
 export const ORCA_SHUTDOWN_CHECKPOINT_FAILURE_REASON_ATTRIBUTE =
   'data-orca-shutdown-checkpoint-failure'
 
+export function formatShutdownCheckpointFailureReason(error: unknown): string {
+  try {
+    return String(error instanceof Error ? error.message : error)
+  } catch {
+    return 'Unknown shutdown checkpoint failure'
+  }
+}
+
 export function publishShutdownCheckpointFailureReason(reason: string): void {
   try {
     globalThis.document?.documentElement?.setAttribute(

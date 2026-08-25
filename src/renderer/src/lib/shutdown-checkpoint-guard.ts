@@ -1,5 +1,6 @@
 import {
   clearShutdownCheckpointFailureReason,
+  formatShutdownCheckpointFailureReason,
   ORCA_RENDERER_SHUTDOWN_CHECKPOINT_FAILED_EVENT,
   ORCA_RENDERER_UNLOAD_PREVENTED_EVENT,
   publishShutdownCheckpointFailureReason
@@ -15,12 +16,15 @@ export type ShutdownCheckpointGuard = {
 // build behind an error that names the symptom while the cause is swallowed (STA-5505).
 function reportShutdownCheckpointFailure(error: unknown): void {
   console.error('[app] Shutdown checkpoint persist failed:', error)
-  const message = error instanceof Error ? error.message : String(error)
+  const message = formatShutdownCheckpointFailureReason(error)
   publishShutdownCheckpointFailureReason(message)
   recordRendererCrashBreadcrumb('renderer_shutdown_checkpoint_failed', { message })
 }
 
-export function createShutdownCheckpointGuard(persist: () => void): ShutdownCheckpointGuard {
+export function createShutdownCheckpointGuard(
+  persist: () => void,
+  resetPersistAttempt?: () => void
+): ShutdownCheckpointGuard {
   let persisted = false
   return {
     persistOnce(): boolean {
@@ -41,6 +45,7 @@ export function createShutdownCheckpointGuard(persist: () => void): ShutdownChec
     },
     reset(): void {
       persisted = false
+      resetPersistAttempt?.()
     }
   }
 }

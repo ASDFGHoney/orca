@@ -86,5 +86,10 @@ export async function dispatchWindowCloseRequest(data: { isQuitting: boolean }):
     activeHandler(data)
     return
   }
-  window.api.ui.confirmWindowClose()
+  const accepted = runWithWindowCloseCheckpointScope(() =>
+    window.dispatchEvent(new Event('beforeunload', { cancelable: true }))
+  )
+  if (accepted) {
+    window.api.ui.confirmWindowClose()
+  }
 }

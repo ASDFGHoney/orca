@@ -84,6 +84,25 @@ describe('createShutdownCheckpointGuard', () => {
     expect(consumeShutdownCheckpointFailureReason()).toBeNull()
   })
 
+  it('keeps failure reporting non-throwing for unstringifiable thrown values', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const guard = createShutdownCheckpointGuard(() => {
+      throw Object.create(null)
+    })
+
+    expect(guard.persistOnce()).toBe(false)
+    expect(consumeShutdownCheckpointFailureReason()).toBe('Unknown shutdown checkpoint failure')
+  })
+
+  it('resets state owned by the persist attempt lifecycle', () => {
+    const resetPersistAttempt = vi.fn()
+    const guard = createShutdownCheckpointGuard(vi.fn(), resetPersistAttempt)
+
+    guard.reset()
+
+    expect(resetPersistAttempt).toHaveBeenCalledTimes(1)
+  })
+
   it('reports checkpoint failure separately from the unload verdict', () => {
     const eventTarget = new EventTarget()
     const failed = vi.fn()
