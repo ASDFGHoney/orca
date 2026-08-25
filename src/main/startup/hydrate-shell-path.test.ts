@@ -211,8 +211,10 @@ describe('hydrateShellPath', () => {
   })
 
   it('overwrites the captured key in place so Windows never carries both Path and PATH', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const originalWindowsPath = process.env.Path
     delete process.env.PATH
+    process.env.PATH = 'C:\\Users\\u\\.nvm\\versions\\node\\v22.9.0\\bin;C:\\Windows'
     process.env.Path = 'C:\\Users\\u\\.nvm\\versions\\node\\v22.9.0\\bin;C:\\Windows'
     _setLaunchPathForTests('C:\\Windows', 'Path')
 

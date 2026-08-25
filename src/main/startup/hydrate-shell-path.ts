@@ -121,11 +121,21 @@ function shellProbeEnv(): NodeJS.ProcessEnv {
   const key = launchPathOverride?.key ?? LAUNCH_PATH_KEY
   const value = launchPathOverride?.value ?? LAUNCH_PATH
   const env: NodeJS.ProcessEnv = { ...process.env, [PROBE_MARKER_ENV_VAR]: '1' }
-  if (value !== null) {
-    // Why the captured key, not a literal 'PATH': overwrite in place so Windows
-    // never ends up carrying both `Path` and `PATH` on the spawn env.
-    env[key] = value
+  if (value === null) {
+    return env
   }
+  if (process.platform === 'win32') {
+    // Why: the spread is a plain, case-sensitive object, but Windows resolves env
+    // names case-insensitively. Writing our key back without dropping the other
+    // casing leaves the seeded value live under `PATH` beside a clean `Path`, and
+    // the shell may read either one.
+    for (const name of Object.keys(env)) {
+      if (name !== key && name.toLowerCase() === key.toLowerCase()) {
+        delete env[name]
+      }
+    }
+  }
+  env[key] = value
   return env
 }
 
