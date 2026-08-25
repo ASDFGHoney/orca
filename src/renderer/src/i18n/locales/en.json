@@ -14475,6 +14475,13 @@
           "23433fcdea": "combined characters",
           "7944ed9fb8": "Not counted"
         },
+        "LargeFileFallback": {
+          "0aabd49594": "This file is too large to open in the editor.",
+          "64689ffd03": "Size",
+          "a66faf5b54": "Editor limit",
+          "e13c1c94e0": "Files this large are not loaded into the editor, so the window stays responsive. Open it in an external editor, or split it before editing.",
+          "e51e6a81c9": "Try again"
+        },
         "DiffViewer": {
           "b5675b0694": "Save",
           "593f2193f6": "This draft crossed the safe display limit, but it can still be saved."

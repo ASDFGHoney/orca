@@ -1,6 +1,8 @@
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { translate } from '@/i18n/i18n'
+import { parseFileTooLargeMessage } from '../../../../shared/editor-file-read-limits'
+import { LargeFileFallback } from './LargeFileFallback'
 
 export function EditorFileLoadErrorView({
   message,
@@ -9,6 +11,12 @@ export function EditorFileLoadErrorView({
   message: string
   onRetry: () => void
 }): React.JSX.Element {
+  // Why: an oversized file is a known limit, not a failure — say so instead of an error card with no next step.
+  const tooLarge = parseFileTooLargeMessage(message)
+  if (tooLarge) {
+    return <LargeFileFallback details={tooLarge} onRetry={onRetry} />
+  }
+
   return (
     <div className="flex h-full items-center justify-center bg-editor-surface p-6 text-sm text-muted-foreground">
       <div className="flex max-w-xl items-start gap-3 rounded-md border border-border bg-background p-4">

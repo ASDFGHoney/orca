@@ -12,15 +12,14 @@ import {
   isBinaryBuffer,
   isBinaryFilePrefix
 } from './fs-handler-utils'
+import { fileTooLargeMessage } from '../shared/editor-file-read-limits'
 
 export async function readRelayFileContent(filePath: string) {
   const stats = await stat(filePath)
   const mimeType = IMAGE_MIME_TYPES[extname(filePath).toLowerCase()]
   const sizeLimit = mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
   if (stats.size > sizeLimit) {
-    throw new Error(
-      `File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB exceeds ${sizeLimit / 1024 / 1024}MB limit`
-    )
+    throw new Error(fileTooLargeMessage(stats.size, sizeLimit))
   }
 
   if (mimeType) {
@@ -82,9 +81,7 @@ export async function readRelayFileStreamMetadata(
   const mimeType = IMAGE_MIME_TYPES[extname(filePath).toLowerCase()]
   const sizeLimit = mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
   if (stats.size > sizeLimit) {
-    throw new Error(
-      `File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB exceeds ${sizeLimit / 1024 / 1024}MB limit`
-    )
+    throw new Error(fileTooLargeMessage(stats.size, sizeLimit))
   }
 
   if (stats.size === 0) {

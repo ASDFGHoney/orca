@@ -435,8 +435,48 @@ describe('registerFilesystemHandlers', () => {
     expect(readFileMock).not.toHaveBeenCalled()
   })
 
+  // Regression: a 14MB JSON/CSV is well inside Monaco's large-file handling and must still open.
+  it('opens local text files between the remote budget and the local one', async () => {
+    statMock.mockResolvedValue({ size: 14 * 1024 * 1024, isDirectory: () => false, mtimeMs: 123 })
+    openMock.mockResolvedValue({
+      read: vi.fn(async (buffer: Buffer) => {
+        buffer.write('{"a":1}')
+        return { bytesRead: 7, buffer }
+      }),
+      close: vi.fn()
+    })
+    readFileMock.mockResolvedValue(Buffer.from('{"a":1}'))
+
+    registerFilesystemHandlers(store as never)
+
+    await expect(
+      handlers.get('fs:readFile')!(null, { filePath: path.resolve('/workspace/repo/huge.json') })
+    ).resolves.toEqual({ content: '{"a":1}', isBinary: false })
+  })
+
+  it('still opens local log snapshots at the local text budget', async () => {
+    const content = Buffer.alloc(12 * 1024 * 1024, 'a')
+    const close = vi.fn()
+    openMock.mockResolvedValue({
+      stat: vi.fn().mockResolvedValue({ size: content.byteLength, dev: 1, ino: 2, birthtimeMs: 3 }),
+      readFile: vi.fn().mockResolvedValue(content),
+      close
+    })
+
+    registerFilesystemHandlers(store as never)
+
+    await expect(
+      handlers.get('fs:readFile')!(null, {
+        filePath: path.resolve('/workspace/repo/session.jsonl'),
+        includeLocalLogMetadata: true
+      })
+    ).resolves.toMatchObject({ isBinary: false, fileIdentity: '1:2:3' })
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  // Regression: a 20MB zip must reach the binary probe and get the placeholder, not a size refusal.
   it('probes large unknown binaries without reading the full file', async () => {
-    statMock.mockResolvedValue({ size: 6 * 1024 * 1024, isDirectory: () => false, mtimeMs: 123 })
+    statMock.mockResolvedValue({ size: 20 * 1024 * 1024, isDirectory: () => false, mtimeMs: 123 })
     openMock.mockResolvedValue({
       read: vi.fn(async (buffer: Buffer) => {
         buffer[0] = 0x00

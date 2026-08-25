@@ -1,10 +1,11 @@
 import type { FileReadLimits } from '../providers/types'
-
-const MAX_PREVIEWABLE_BINARY_SIZE = 50 * 1024 * 1024
-const MAX_TEXT_FILE_SIZE = 10 * 1024 * 1024
+import {
+  MAX_PREVIEWABLE_BINARY_BYTES,
+  MAX_REMOTE_TEXT_FILE_BYTES
+} from '../../shared/editor-file-read-limits'
 
 export function sshFileStreamReadCap(isBinary: boolean, limits?: FileReadLimits): number {
-  const defaultCap = isBinary ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
+  const defaultCap = isBinary ? MAX_PREVIEWABLE_BINARY_BYTES : MAX_REMOTE_TEXT_FILE_BYTES
   const requestedCap = isBinary ? limits?.maxBinaryBytes : limits?.maxTextBytes
   return requestedCap === undefined ? defaultCap : Math.min(defaultCap, requestedCap)
 }

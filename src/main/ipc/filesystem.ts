@@ -141,18 +141,19 @@ import { getWorktreeSharedLinkPaths } from '../git/worktree-shared-directories'
 import { createSenderScopedRequestCancellations } from './sender-scoped-request-cancellation'
 import { QuickOpenPathRanker } from '../../shared/quick-open-path-search'
 import {
+  MAX_LOCAL_TEXT_FILE_BYTES,
+  MAX_PREVIEWABLE_BINARY_BYTES,
+  fileTooLargeMessage
+} from '../../shared/editor-file-read-limits'
+import {
   applyGitStatusUpstreamRefWatchRequest,
   type GitStatusUpstreamRefWatchRequest
 } from './git-status-upstream-ref-watch-request'
 
-// Why: Monaco degrades features on large files like VS Code, so a 5MB block would needlessly lock out ordinary JSON/log files.
-const MAX_TEXT_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 const BINARY_PROBE_BYTES = 8192
 const FULL_GIT_OBJECT_ID_PATTERN = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/
 // 32 visible matches plus one truncation sentinel stays below the legacy frame ceiling.
 const QUICK_OPEN_SSH_LEGACY_RESULT_LIMIT = 33
-// Why: previewable binaries are base64 blobs (not parsed as text), and local IPC has no frame limit (unlike the relay's 10MB), so 50MB is safe.
-const MAX_PREVIEWABLE_BINARY_SIZE = 50 * 1024 * 1024 // 50MB
 const PREVIEWABLE_BINARY_MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -172,16 +173,12 @@ async function readLocalLogSnapshot(filePath: string): Promise<{
   const handle = await open(filePath, 'r')
   try {
     const stats = await handle.stat()
-    if (stats.size > MAX_TEXT_FILE_SIZE) {
-      throw new Error(
-        `File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_FILE_SIZE / 1024 / 1024}MB limit`
-      )
+    if (stats.size > MAX_LOCAL_TEXT_FILE_BYTES) {
+      throw new Error(fileTooLargeMessage(stats.size, MAX_LOCAL_TEXT_FILE_BYTES))
     }
     const buffer = await handle.readFile()
-    if (buffer.byteLength > MAX_TEXT_FILE_SIZE) {
-      throw new Error(
-        `File too large: ${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_FILE_SIZE / 1024 / 1024}MB limit`
-      )
+    if (buffer.byteLength > MAX_LOCAL_TEXT_FILE_BYTES) {
+      throw new Error(fileTooLargeMessage(buffer.byteLength, MAX_LOCAL_TEXT_FILE_BYTES))
     }
     if (isBinaryBuffer(buffer)) {
       return { content: '', isBinary: true }
@@ -599,11 +596,9 @@ export function registerFilesystemHandlers(
       }
       const stats = await stat(filePath)
       const mimeType = PREVIEWABLE_BINARY_MIME_TYPES[extname(filePath).toLowerCase()]
-      const sizeLimit = mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
+      const sizeLimit = mimeType ? MAX_PREVIEWABLE_BINARY_BYTES : MAX_LOCAL_TEXT_FILE_BYTES
       if (stats.size > sizeLimit) {
-        throw new Error(
-          `File too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB exceeds ${sizeLimit / 1024 / 1024}MB limit`
-        )
+        throw new Error(fileTooLargeMessage(stats.size, sizeLimit))
       }
 
       if (mimeType) {
