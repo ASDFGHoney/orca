@@ -687,3 +687,42 @@ describe('agent sleep coordinator', () => {
     ).toHaveLength(2)
   })
 })
+
+describe('teardown drains sequentially', () => {
+  // Why: each shutdown re-runs a full runtime-liveness sweep and then a stopExact RPC.
+  // Firing the whole confirmed set at once meant ~100 concurrent sweeps plus ~100
+  // concurrent stops on the first pass after a backlog — hundreds of near-simultaneous
+  // RPCs on an SSH runtime.
+  it('never runs two pane teardowns at the same time', async () => {
+    let inFlight = 0
+    let maxInFlight = 0
+    const shutdown = vi.fn().mockImplementation(async () => {
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight -= 1
+    })
+    const second = '22222222-2222-4222-8222-222222222222'
+    const third = '33333333-3333-4333-8333-333333333333'
+    const leafIds = [LEAF, second, third]
+    const entries = leafIds.map((leafId) => ({ ...entry(), paneKey: `tab-1:${leafId}` }))
+    installEligibleState(shutdown, {
+      terminalLayoutsByTabId: {
+        'tab-1': {
+          root: { type: 'leaf', leafId: LEAF },
+          activeLeafId: LEAF,
+          expandedLeafId: null,
+          ptyIdsByLeafId: Object.fromEntries(leafIds.map((id, i) => [id, `pty-${i + 1}`]))
+        }
+      } as never,
+      ptyIdsByTabId: { 'tab-1': leafIds.map((_, i) => `pty-${i + 1}`) },
+      agentStatusByPaneKey: Object.fromEntries(entries.map((e) => [e.paneKey, e])) as never
+    })
+
+    await runAgentHibernationTick()
+    await runAgentHibernationTick()
+
+    expect(shutdown).toHaveBeenCalledTimes(leafIds.length)
+    expect(maxInFlight).toBe(1)
+  })
+})

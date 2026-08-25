@@ -225,8 +225,15 @@ export async function runAgentHibernationTick(): Promise<void> {
       await currentCandidates(coordinator.now())
     )
     coordinator.confirmationState = plan.confirmationState
+    // Why: drain sequentially. Each shutdown re-runs a full runtime-liveness sweep and
+    // then a stopExact RPC, so firing the whole confirmed set at once meant ~100
+    // concurrent sweeps plus ~100 concurrent stops on the first pass after a backlog —
+    // hundreds of near-simultaneous RPCs on an SSH runtime. Awaiting also makes
+    // `tickInFlight` actually cover the drain; unawaited, it was cleared the moment the
+    // promises were launched. Each candidate re-validates against a fresh plan at its own
+    // turn, so a slow drain cannot act on stale confirmation.
     for (const candidate of plan.candidates) {
-      void hibernatePaneIfStillEligible(candidate)
+      await hibernatePaneIfStillEligible(candidate)
     }
   } finally {
     coordinator.tickInFlight = false
