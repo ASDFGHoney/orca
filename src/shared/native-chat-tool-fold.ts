@@ -6,11 +6,28 @@ import {
   type NativeChatToolCallBlock,
   type NativeChatToolResultBlock
 } from './native-chat-types'
+import { isKnownHarnessInjectedUserTurnText } from './harness-injected-user-turns'
+import { isNoiseMessage } from './native-chat-noise'
 
 function isToolOnlyMessage(message: NativeChatMessage): boolean {
   return (
     message.blocks.length > 0 &&
     message.blocks.every((block) => isToolCallBlock(block) || isToolResultBlock(block))
+  )
+}
+
+function isHarnessSidecarToolMessage(message: NativeChatMessage): boolean {
+  if (message.role !== 'user' || !message.blocks.some(isToolResultBlock)) {
+    return false
+  }
+  const textBlocks = message.blocks.filter((block) => block.type === 'text')
+  return (
+    textBlocks.length > 0 &&
+    message.blocks.every(
+      (block) =>
+        isToolResultBlock(block) ||
+        (block.type === 'text' && isKnownHarnessInjectedUserTurnText(block.text))
+    )
   )
 }
 
@@ -39,18 +56,46 @@ function dropUnattributableToolResults(message: NativeChatMessage): NativeChatMe
 export function foldToolMessages(messages: readonly NativeChatMessage[]): NativeChatMessage[] {
   const output: NativeChatMessage[] = []
   let mutableAssistantIndex = -1
+  let clonedAssistantIndex = -1
   for (const message of messages) {
-    const previous = output.at(-1)
-    if (isToolOnlyMessage(message) && previous?.role === 'assistant') {
-      const index = output.length - 1
-      if (mutableAssistantIndex !== index) {
-        output[index] = { ...previous, blocks: [...previous.blocks] }
-        mutableAssistantIndex = index
+    if (isHarnessSidecarToolMessage(message) && mutableAssistantIndex >= 0) {
+      const index = mutableAssistantIndex
+      const assistant = output[index]
+      if (assistant?.role === 'assistant') {
+        if (clonedAssistantIndex !== index) {
+          output[index] = { ...assistant, blocks: [...assistant.blocks] }
+          clonedAssistantIndex = index
+        }
+        output[index].blocks.push(...message.blocks.filter(isToolResultBlock))
+        output.push({
+          ...message,
+          blocks: message.blocks.filter((block) => !isToolResultBlock(block))
+        })
+        continue
+      }
+    }
+    if (isToolOnlyMessage(message) && mutableAssistantIndex >= 0) {
+      const index = mutableAssistantIndex
+      const assistant = output[index]
+      if (assistant?.role !== 'assistant') {
+        output.push(message)
+        mutableAssistantIndex = -1
+        continue
+      }
+      if (clonedAssistantIndex !== index) {
+        output[index] = { ...assistant, blocks: [...assistant.blocks] }
+        clonedAssistantIndex = index
       }
       output[index]!.blocks.push(...message.blocks)
-    } else {
-      output.push(message)
+      continue
+    }
+    output.push(message)
+    if (message.role === 'assistant') {
+      mutableAssistantIndex = output.length - 1
+      clonedAssistantIndex = -1
+    } else if (!isNoiseMessage(message)) {
       mutableAssistantIndex = -1
+      clonedAssistantIndex = -1
     }
   }
   const attributedOutput: NativeChatMessage[] = []

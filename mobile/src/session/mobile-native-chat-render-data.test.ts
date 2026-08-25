@@ -222,6 +222,27 @@ describe('foldMobileNativeChatMessages', () => {
     ])
   })
 
+  it('keeps a mixed Claude tool result with a harness sidecar paired', () => {
+    const folded = foldMobileNativeChatMessages([
+      toolCall('c1'),
+      {
+        id: 'mixed',
+        role: 'user',
+        blocks: [
+          { type: 'tool-result', output: 'important output' },
+          { type: 'text', text: '<system-reminder>continue</system-reminder>' }
+        ],
+        timestamp: 0,
+        source: 'transcript'
+      }
+    ])
+
+    expect(folded[0]?.blocks).toEqual([
+      { type: 'tool-call', name: 'Bash', input: { command: 'command -v orca-ide' } },
+      { type: 'tool-result', output: 'important output' }
+    ])
+  })
+
   it('keeps a hidden interruption from authorizing a later result', () => {
     const folded = foldMobileNativeChatMessages([
       toolCall('c1'),

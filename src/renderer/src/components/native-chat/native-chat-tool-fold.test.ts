@@ -114,6 +114,51 @@ describe('foldToolMessages', () => {
     ])
     expect(folded.map((m) => m.id)).toEqual(['a', 'b'])
   })
+
+  it('attributes a Claude tool result carried with a harness sidecar', () => {
+    const folded = foldToolMessages([
+      msg({
+        id: 'a',
+        role: 'assistant',
+        blocks: [{ type: 'tool-call', name: 'Read', input: {} }]
+      }),
+      msg({
+        id: 'u',
+        role: 'user',
+        blocks: [
+          { type: 'tool-result', output: 'important output' },
+          { type: 'text', text: '<system-reminder>continue</system-reminder>' }
+        ]
+      })
+    ])
+
+    expect(folded).toEqual([
+      expect.objectContaining({
+        id: 'a',
+        blocks: [
+          { type: 'tool-call', name: 'Read', input: {} },
+          { type: 'tool-result', output: 'important output' }
+        ]
+      }),
+      expect.objectContaining({
+        id: 'u',
+        blocks: [{ type: 'text', text: '<system-reminder>continue</system-reminder>' }]
+      })
+    ])
+  })
+
+  it('folds through a harness noise boundary but not a real user turn', () => {
+    const folded = foldToolMessages([
+      msg({ id: 'a', role: 'assistant', blocks: [{ type: 'tool-call', name: 'Read', input: {} }] }),
+      msg({ id: 'n', role: 'user', blocks: [{ type: 'text', text: '<task-notification>done' }] }),
+      msg({ id: 'r', role: 'tool', blocks: [{ type: 'tool-result', output: 'ok' }] })
+    ])
+
+    expect(folded.find((message) => message.id === 'a')?.blocks).toEqual([
+      { type: 'tool-call', name: 'Read', input: {} },
+      { type: 'tool-result', output: 'ok' }
+    ])
+  })
 })
 
 describe('splitNativeChatBlocks', () => {
