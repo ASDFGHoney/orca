@@ -37,6 +37,9 @@ type RecoveryBackoff = { failures: number; nextAttemptAt: number; trafficProbedA
  * freshly-failing host cannot drag a long-unreachable one back to the base interval. */
 const backoffByEnvironment = new Map<string, RecoveryBackoff>()
 const probingEnvironments = new Set<string>()
+/** One generation per installed port. A stopped session clears the state below, so without
+ * this its probe would settle into the next session's — see `probe` (#16518 review). */
+let sessionGeneration = 0
 
 function backoffDelayMs(failures: number): number {
   return Math.min(RECOVERY_PROBE_BASE_DELAY_MS * 2 ** failures, RECOVERY_PROBE_MAX_DELAY_MS)
@@ -88,10 +91,18 @@ function probe(environmentId: string): void {
   if (!active || probingEnvironments.has(environmentId)) {
     return
   }
+  // Why capture: StrictMode double-mounts the effect that installs the port, so this probe
+  // routinely outlives its own session. Settling into the live one would charge its retry
+  // budget and clear the in-flight marker of a probe that is still running.
+  const generation = sessionGeneration
+  const isLiveSession = (): boolean => generation === sessionGeneration
   probingEnvironments.add(environmentId)
   void active
     .refreshRuntimeEnvironmentStatus(environmentId)
     .then((outcome) => {
+      if (!isLiveSession()) {
+        return
+      }
       // Why: a superseded answer belongs to a retired pairing, so it is evidence about
       // neither this host's reachability nor its state — leave the budget where it was.
       if (outcome === 'superseded') {
@@ -107,8 +118,15 @@ function probe(environmentId: string): void {
         backoffByEnvironment.delete(environmentId)
       }
     })
-    .catch(() => recordUnrecoveredProbe(environmentId))
+    .catch(() => {
+      if (isLiveSession()) {
+        recordUnrecoveredProbe(environmentId)
+      }
+    })
     .finally(() => {
+      if (!isLiveSession()) {
+        return
+      }
       probingEnvironments.delete(environmentId)
       // Rearm, not schedule: this host's new deadline can be earlier than the pending
       // guard the sweep armed against while the probe was in flight.
@@ -212,6 +230,8 @@ export function startRuntimeStatusRecoveryProbe(next: RuntimeStatusRecoveryPort)
     if (port !== next) {
       return
     }
+    // Retires every in-flight probe with the port, so none of them writes the state cleared below.
+    sessionGeneration += 1
     port = null
     if (timer !== null) {
       clearTimeout(timer)

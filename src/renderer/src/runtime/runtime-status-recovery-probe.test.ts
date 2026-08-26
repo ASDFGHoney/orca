@@ -349,6 +349,56 @@ describe('runtime status recovery probe', () => {
     expect(refresh).not.toHaveBeenCalled()
   })
 
+  it('ignores a probe that settles after its session was stopped', async () => {
+    // React StrictMode double-mounts the effect that installs the port, so a probe from the
+    // retired mount routinely settles into the live one. Letting it clear the live in-flight
+    // marker lets the next sweep open a second probe for a host already being probed.
+    const { port, refresh, markDisconnected } = createPort()
+    markDisconnected('honey-mac')
+    const settleProbe: ((outcome: RuntimeStatusRefreshOutcome) => void)[] = []
+    refresh.mockImplementation(
+      () => new Promise<RuntimeStatusRefreshOutcome>((resolve) => settleProbe.push(resolve))
+    )
+    const stopRetiredSession = startRuntimeStatusRecoveryProbe(port)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(settleProbe).toHaveLength(1)
+
+    stopRetiredSession()
+    stop = startRuntimeStatusRecoveryProbe(port)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(settleProbe).toHaveLength(2)
+
+    settleProbe[0]('unreachable')
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    // The live probe is still in flight, so nothing may open a second one for the same host.
+    expect(settleProbe).toHaveLength(2)
+  })
+
+  it('does not charge a retired probe against the live retry budget', async () => {
+    // The retired answer describes a pairing that no longer exists, so widening the fresh
+    // session's backoff with it pushes its first real attempt past its own base interval.
+    const { port, refresh, markDisconnected } = createPort()
+    markDisconnected('honey-mac')
+    const settleProbe: ((outcome: RuntimeStatusRefreshOutcome) => void)[] = []
+    refresh.mockImplementation(
+      () => new Promise<RuntimeStatusRefreshOutcome>((resolve) => settleProbe.push(resolve))
+    )
+    const stopRetiredSession = startRuntimeStatusRecoveryProbe(port)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(settleProbe).toHaveLength(1)
+
+    stopRetiredSession()
+    stop = startRuntimeStatusRecoveryProbe(port)
+
+    // The retired probe settles before the fresh session's first attempt is due.
+    settleProbe[0]('unreachable')
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(settleProbe).toHaveLength(2)
+  })
+
   it('survives a probe that rejects', async () => {
     const { port, markDisconnected } = createPort()
     markDisconnected('honey-mac')
