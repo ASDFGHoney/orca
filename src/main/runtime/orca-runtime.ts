@@ -1828,6 +1828,12 @@ type RuntimeHeadlessTerminal = {
   writeChain: Promise<void>
 }
 
+/** The pane a split created: the handle that addresses it and the leaf a client claims focus for. */
+type CreatedSplitLeaf = {
+  handle: string
+  leafId: string
+}
+
 export type RuntimePtyDataAdmission = Readonly<{
   sequence: number
   completion: Promise<void>
@@ -30687,12 +30693,15 @@ export class OrcaRuntimeService {
     this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
   }
 
+  // Why the bound: this resolves the first leaf the tab gained, not provably this split's, so two
+  // splits racing in one tab can swap handles — and now the leaf each client claims focus for.
+  // Narrowing it needs the renderer to echo which split request minted which leaf.
   private waitForNewLeafInTab(
     tabId: string,
     existingLeafKeys: Set<string>,
     timeoutMs = 10_000
-  ): Promise<{ handle: string; leafId: string }> {
-    const tryResolve = (): { handle: string; leafId: string } | null => {
+  ): Promise<CreatedSplitLeaf> {
+    const tryResolve = (): CreatedSplitLeaf | null => {
       for (const [key, leaf] of this.leaves) {
         if (leaf.tabId === tabId && !existingLeafKeys.has(key) && leaf.ptyId !== null) {
           return { handle: this.issueHandle(leaf), leafId: leaf.leafId }
@@ -30706,7 +30715,7 @@ export class OrcaRuntimeService {
       return Promise.resolve(existing)
     }
 
-    return new Promise<{ handle: string; leafId: string }>((resolve, reject) => {
+    return new Promise<CreatedSplitLeaf>((resolve, reject) => {
       const timer = setTimeout(() => {
         const idx = this.graphSyncCallbacks.indexOf(check)
         if (idx !== -1) {

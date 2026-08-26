@@ -1514,37 +1514,39 @@ export function splitWebRuntimeTerminal(
 }
 
 /** Claims the split's new leaf so the mirror activates it instead of the pane that was split.
- *  Why: the mirrored layout prefers the leaf this client already had active, so without a
- *  claim a host-delegated split lands unfocused — the same claim a created tab records. */
+ *  Why: the mirrored layout prefers the leaf this client already had active, so without a claim a
+ *  host-delegated split lands unfocused — the same claim a created tab records. A host too old to
+ *  name the leaf leaves focus where it is rather than claiming the wrong pane. */
 async function focusSplitWebRuntimeTerminalPane(
   intentOwner: WebSessionIntentOwner,
   split: RuntimeTerminalSplit | undefined
 ): Promise<void> {
   const hostTabId = split?.tabId?.trim()
-  // Why: hosts predating RuntimeTerminalSplit.leafId cannot name the new pane; leave
-  // their focus where it is rather than claiming the wrong leaf.
   const leafId = split?.leafId?.trim()
   if (!hostTabId || !leafId || !matchesWebSessionIntentOwner(intentOwner)) {
     return
   }
-  const worktreeId = resolveWebRuntimeSessionWorktreeIdForHostTab(hostTabId)
+  const worktreeId = resolveWebRuntimeSessionWorktreeIdForHostTerminalTab(hostTabId)
   if (!worktreeId) {
     return
   }
+  // Why this channel despite two effects a local split has no counterpart for — it also makes the
+  // split's tab the visible one and moves an existing zoom onto the new pane: both keep the pane
+  // the user just asked for on screen, and focusing a pane behind a zoomed sibling is worse.
   recordWebSessionFocusIntent(intentOwner, worktreeId, hostTabId, leafId)
   await refreshWebRuntimeSessionTabsSnapshot(intentOwner.environmentId, worktreeId, {
-    ...(intentOwner.pairingRevision !== undefined
-      ? { expectedEnvironmentPairingRevision: intentOwner.pairingRevision }
-      : {}),
+    expectedEnvironmentPairingRevision: intentOwner.pairingRevision,
     // Why: the host can publish the split before the RPC answers; replay it once the intent exists.
     acceptCurrentSnapshot: true
   })
 }
 
-/** Finds the worktree owning a host tab, which the split result identifies but does not name. */
-function resolveWebRuntimeSessionWorktreeIdForHostTab(hostTabId: string): string | null {
+/** Finds the worktree owning a host terminal tab, which the split result identifies but does not name. */
+function resolveWebRuntimeSessionWorktreeIdForHostTerminalTab(hostTabId: string): string | null {
   const localTabId = toWebTerminalSurfaceTabId(hostTabId)
   for (const tabs of Object.values(useAppStore.getState()?.tabsByWorktree ?? {})) {
+    // Why the raw host id too: a client-minted agent-session tab keeps its own id until the mirror
+    // replaces it, and the host adopts that id for its own tab (orca-runtime placement.tabId).
     const owner = tabs.find((tab) => tab.id === localTabId || tab.id === hostTabId)
     if (owner) {
       return owner.worktreeId
