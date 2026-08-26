@@ -1460,6 +1460,8 @@ async function callWebRuntimeSessionTabMethod(
   }
 }
 
+/** Delegates a remote pane's split to its host and claims focus for the pane that comes back.
+ *  Returns false for a local pane, which the caller then splits itself. */
 export function splitWebRuntimeTerminal(
   ptyId: string | null | undefined,
   direction: 'horizontal' | 'vertical',
@@ -1511,9 +1513,9 @@ export function splitWebRuntimeTerminal(
   return true
 }
 
-// Why: the mirrored layout keeps whichever leaf this client already had active, so a
-// host-delegated split lands unfocused unless the initiator claims the new leaf the way
-// createWebRuntimeSessionTerminal claims a created tab.
+/** Claims the split's new leaf so the mirror activates it instead of the pane that was split.
+ *  Why: the mirrored layout prefers the leaf this client already had active, so without a
+ *  claim a host-delegated split lands unfocused — the same claim a created tab records. */
 async function focusSplitWebRuntimeTerminalPane(
   intentOwner: WebSessionIntentOwner,
   split: RuntimeTerminalSplit | undefined
@@ -1539,6 +1541,7 @@ async function focusSplitWebRuntimeTerminalPane(
   })
 }
 
+/** Finds the worktree owning a host tab, which the split result identifies but does not name. */
 function resolveWebRuntimeSessionWorktreeIdForHostTab(hostTabId: string): string | null {
   const localTabId = toWebTerminalSurfaceTabId(hostTabId)
   for (const tabs of Object.values(useAppStore.getState()?.tabsByWorktree ?? {})) {
