@@ -114,6 +114,62 @@ describe('runtime status recovery probe', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  it('does not turn RPC frequency into probe frequency after a failed probe', async () => {
+    // A host that answers requests but fails `status.get` used to get one probe per
+    // request: every note dropped the backoff entry and re-probed.
+    const { port, refresh, markUnverified } = createPort()
+    markUnverified('honey-mac')
+    stop = startRuntimeStatusRecoveryProbe(port)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    for (let index = 0; index < 20; index += 1) {
+      noteRuntimeEnvironmentReachable('honey-mac')
+      await vi.advanceTimersByTimeAsync(0)
+    }
+
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers a host sitting at the backoff cap as soon as it answers a request', async () => {
+    // Why traffic is not gated on `nextAttemptAt`: at the 60s cap that would hold the red
+    // glyph for up to another minute on a host the user is actively working with (#16516).
+    const { port, refresh, markUnverified, letHostAnswer } = createPort()
+    markUnverified('honey-mac')
+    stop = startRuntimeStatusRecoveryProbe(port)
+
+    await vi.advanceTimersByTimeAsync(600_000)
+    const callsBeforeTraffic = refresh.mock.calls.length
+
+    letHostAnswer('honey-mac')
+    noteRuntimeEnvironmentReachable('honey-mac')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(refresh).toHaveBeenCalledTimes(callsBeforeTraffic + 1)
+    expect(port.isRuntimeEnvironmentUnverified('honey-mac')).toBe(false)
+  })
+
+  it('lets traffic probe again once the floor between traffic probes has elapsed', async () => {
+    // The throttle is a floor of its own, not a deferral to the failure backoff, so
+    // recovery stays within one base interval however long the outage has been running.
+    const { port, refresh, markUnverified } = createPort()
+    markUnverified('honey-mac')
+    stop = startRuntimeStatusRecoveryProbe(port)
+
+    noteRuntimeEnvironmentReachable('honey-mac')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(4_000)
+    noteRuntimeEnvironmentReachable('honey-mac')
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    noteRuntimeEnvironmentReachable('honey-mac')
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
   it('keeps re-probing an unreachable host on a widening backoff', async () => {
     const { port, refresh, markUnverified } = createPort()
     markUnverified('honey-mac')

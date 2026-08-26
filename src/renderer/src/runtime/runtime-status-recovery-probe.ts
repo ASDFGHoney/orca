@@ -29,7 +29,7 @@ export type RuntimeStatusRecoveryPort = {
 
 let port: RuntimeStatusRecoveryPort | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
-type RecoveryBackoff = { failures: number; nextAttemptAt: number }
+type RecoveryBackoff = { failures: number; nextAttemptAt: number; trafficProbedAt: number | null }
 /** Per-environment retry budget. Each host backs off on its own clock, so one
  * freshly-failing host cannot drag a long-unreachable one back to the base interval. */
 const backoffByEnvironment = new Map<string, RecoveryBackoff>()
@@ -44,7 +44,11 @@ function backoffFor(environmentId: string, now: number): RecoveryBackoff {
   if (!entry) {
     // First sighting: the caller's own probe just recorded this host unreachable,
     // so wait one interval rather than re-asking the question it answered.
-    entry = { failures: 0, nextAttemptAt: now + RECOVERY_PROBE_BASE_DELAY_MS }
+    entry = {
+      failures: 0,
+      nextAttemptAt: now + RECOVERY_PROBE_BASE_DELAY_MS,
+      trafficProbedAt: null
+    }
     backoffByEnvironment.set(environmentId, entry)
   }
   return entry
@@ -155,8 +159,21 @@ export function noteRuntimeEnvironmentReachable(environmentId: string): void {
   if (!port?.isRuntimeEnvironmentUnverified(environmentId)) {
     return
   }
-  // A host that just answered deserves the full retry budget again.
-  backoffByEnvironment.delete(environmentId)
+  const now = Date.now()
+  const entry = backoffFor(environmentId, now)
+  // Why traffic gets its own floor instead of deferring to `nextAttemptAt`: traffic is
+  // evidence the failure deadline has not seen, so a host answering at the 60s cap must
+  // recover now, not a minute later (#16516). The floor is the sweep's own base interval,
+  // so traffic can never probe faster than the recovery loop already does.
+  if (
+    entry.trafficProbedAt !== null &&
+    now - entry.trafficProbedAt < RECOVERY_PROBE_BASE_DELAY_MS
+  ) {
+    return
+  }
+  entry.trafficProbedAt = now
+  // The entry survives: a host that answers requests but fails `status.get` must not
+  // reset the sweep's widening backoff on every request.
   probe(environmentId)
 }
 
@@ -184,7 +201,11 @@ export function startRuntimeStatusRecoveryProbe(next: RuntimeStatusRecoveryPort)
 export function retryRuntimeStatusRecoveryProbesNow(): void {
   const now = Date.now()
   for (const environmentId of port?.listUnverifiedRuntimeEnvironmentIds() ?? []) {
-    backoffByEnvironment.set(environmentId, { failures: 0, nextAttemptAt: now })
+    backoffByEnvironment.set(environmentId, {
+      failures: 0,
+      nextAttemptAt: now,
+      trafficProbedAt: null
+    })
   }
   if (timer !== null) {
     clearTimeout(timer)

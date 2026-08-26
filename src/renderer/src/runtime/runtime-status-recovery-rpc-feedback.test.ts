@@ -19,9 +19,12 @@ let stop: (() => void) | null = null
 const port: RuntimeStatusRecoveryPort = {
   isRuntimeEnvironmentUnverified: (environmentId) => unverified.has(environmentId),
   listUnverifiedRuntimeEnvironmentIds: () => [...unverified],
-  refreshRuntimeEnvironmentStatus: (environmentId) => {
-    unverified.delete(environmentId)
-    return refreshRuntimeEnvironmentStatus()
+  refreshRuntimeEnvironmentStatus: async (environmentId) => {
+    const reachable = await refreshRuntimeEnvironmentStatus()
+    if (reachable) {
+      unverified.delete(environmentId)
+    }
+    return reachable
   },
   subscribeToRecordedStatusChanges: () => () => {}
 }
@@ -45,7 +48,7 @@ const compatibleStatus = {
 beforeEach(() => {
   clearRuntimeCompatibilityCacheForTests()
   runtimeEnvironmentCall.mockReset()
-  refreshRuntimeEnvironmentStatus.mockClear()
+  refreshRuntimeEnvironmentStatus.mockReset()
   unverified.clear()
   vi.stubGlobal('window', {
     api: {
@@ -70,6 +73,20 @@ describe('runtime status recovery from answered requests', () => {
     respondOk(compatibleStatus)
 
     await callRuntimeRpc({ kind: 'environment', environmentId: 'honey-mac' }, 'status.get')
+
+    expect(refreshRuntimeEnvironmentStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not re-probe once per request after the probe itself failed', async () => {
+    // Why: `callRuntimeRpc` notes every answered environment request, so a host that keeps
+    // answering while its `status.get` fails would otherwise be probed at RPC frequency.
+    unverified.add('honey-mac')
+    refreshRuntimeEnvironmentStatus.mockResolvedValue(false)
+    respondOk(compatibleStatus)
+
+    for (let index = 0; index < 20; index += 1) {
+      await callRuntimeRpc({ kind: 'environment', environmentId: 'honey-mac' }, 'status.get')
+    }
 
     expect(refreshRuntimeEnvironmentStatus).toHaveBeenCalledTimes(1)
   })
