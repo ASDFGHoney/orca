@@ -5,6 +5,7 @@ import {
   type RuntimeStatusRecoveryPort
 } from './runtime-status-recovery-probe'
 import { RUNTIME_PROTOCOL_VERSION } from '../../../shared/protocol-version'
+import type { RuntimeStatusRefreshOutcome } from '@/store/slices/runtime-status-refresh'
 
 /**
  * The recovered-host feedback loop end to end: a request the host answers has to
@@ -12,19 +13,21 @@ import { RUNTIME_PROTOCOL_VERSION } from '../../../shared/protocol-version'
  * written only by explicit probes and a failed boot probe outlives the outage (#16516).
  */
 const runtimeEnvironmentCall = vi.fn()
-const refreshRuntimeEnvironmentStatus = vi.fn(() => Promise.resolve(true))
-const unverified = new Set<string>()
+const refreshRuntimeEnvironmentStatus = vi.fn(() =>
+  Promise.resolve<RuntimeStatusRefreshOutcome>('reachable')
+)
+const disconnectedHosts = new Set<string>()
 let stop: (() => void) | null = null
 
 const port: RuntimeStatusRecoveryPort = {
-  isRuntimeEnvironmentUnverified: (environmentId) => unverified.has(environmentId),
-  listUnverifiedRuntimeEnvironmentIds: () => [...unverified],
+  isRuntimeEnvironmentDisconnected: (environmentId) => disconnectedHosts.has(environmentId),
+  listDisconnectedRuntimeEnvironmentIds: () => [...disconnectedHosts],
   refreshRuntimeEnvironmentStatus: async (environmentId) => {
-    const reachable = await refreshRuntimeEnvironmentStatus()
-    if (reachable) {
-      unverified.delete(environmentId)
+    const outcome = await refreshRuntimeEnvironmentStatus()
+    if (outcome === 'reachable') {
+      disconnectedHosts.delete(environmentId)
     }
-    return reachable
+    return outcome
   },
   subscribeToRecordedStatusChanges: () => () => {}
 }
@@ -49,7 +52,7 @@ beforeEach(() => {
   clearRuntimeCompatibilityCacheForTests()
   runtimeEnvironmentCall.mockReset()
   refreshRuntimeEnvironmentStatus.mockReset()
-  unverified.clear()
+  disconnectedHosts.clear()
   vi.stubGlobal('window', {
     api: {
       runtime: {
@@ -69,7 +72,7 @@ afterEach(() => {
 
 describe('runtime status recovery from answered requests', () => {
   it('re-probes a host recorded as unreachable once it answers a request', async () => {
-    unverified.add('honey-mac')
+    disconnectedHosts.add('honey-mac')
     respondOk(compatibleStatus)
 
     await callRuntimeRpc({ kind: 'environment', environmentId: 'honey-mac' }, 'status.get')
@@ -80,8 +83,8 @@ describe('runtime status recovery from answered requests', () => {
   it('does not re-probe once per request after the probe itself failed', async () => {
     // Why: `callRuntimeRpc` notes every answered environment request, so a host that keeps
     // answering while its `status.get` fails would otherwise be probed at RPC frequency.
-    unverified.add('honey-mac')
-    refreshRuntimeEnvironmentStatus.mockResolvedValue(false)
+    disconnectedHosts.add('honey-mac')
+    refreshRuntimeEnvironmentStatus.mockResolvedValue('unreachable')
     respondOk(compatibleStatus)
 
     for (let index = 0; index < 20; index += 1) {
@@ -104,7 +107,7 @@ describe('runtime status recovery from answered requests', () => {
   it('does not re-probe when the request never reached the host', async () => {
     // A transport failure is not evidence either way — the recorded verdict stands
     // until the backoff sweep asks again (docs/reference/ssh-execution-boundary.md).
-    unverified.add('honey-mac')
+    disconnectedHosts.add('honey-mac')
     runtimeEnvironmentCall.mockRejectedValue(new Error('socket closed'))
 
     await expect(
@@ -115,7 +118,7 @@ describe('runtime status recovery from answered requests', () => {
   })
 
   it('ignores local runtime calls', async () => {
-    unverified.add('honey-mac')
+    disconnectedHosts.add('honey-mac')
 
     await callRuntimeRpc({ kind: 'local' }, 'status.get')
 

@@ -5,9 +5,13 @@ import { renderHook } from '@testing-library/react'
 const { retryAllRemoteRuntimePtyRecoveriesNowMock, refreshRuntimeEnvironmentStatusMock, state } =
   vi.hoisted(() => ({
     retryAllRemoteRuntimePtyRecoveriesNowMock: vi.fn(),
-    refreshRuntimeEnvironmentStatusMock: vi.fn((_environmentId: string) => Promise.resolve(true)),
+    refreshRuntimeEnvironmentStatusMock: vi.fn((_environmentId: string) =>
+      Promise.resolve('reachable' as const)
+    ),
     state: {
-      runtimeStatusByEnvironmentId: new Map<string, { status: unknown }>()
+      runtimeStatusByEnvironmentId: new Map<string, { status: unknown }>(),
+      /** Mirrors a minimal store assembly that never registered the runtime-status slice. */
+      omitRuntimeStatusSlice: false
     }
   }))
 
@@ -19,7 +23,9 @@ vi.mock('@/store', () => ({
   useAppStore: {
     getState: () => ({
       ...state,
-      refreshRuntimeEnvironmentStatus: refreshRuntimeEnvironmentStatusMock
+      refreshRuntimeEnvironmentStatusOutcome: state.omitRuntimeStatusSlice
+        ? undefined
+        : refreshRuntimeEnvironmentStatusMock
     }),
     subscribe: () => () => {}
   }
@@ -44,6 +50,7 @@ describe('useRemoteRuntimeRecoveryTriggers', () => {
     retryAllRemoteRuntimePtyRecoveriesNowMock.mockClear()
     refreshRuntimeEnvironmentStatusMock.mockClear()
     state.runtimeStatusByEnvironmentId = new Map()
+    state.omitRuntimeStatusSlice = false
     vi.useFakeTimers()
     ;(window as unknown as { api: unknown }).api = {
       ui: { onSystemResumed },
@@ -91,6 +98,37 @@ describe('useRemoteRuntimeRecoveryTriggers', () => {
     await vi.advanceTimersByTimeAsync(5_000)
 
     expect(refreshRuntimeEnvironmentStatusMock.mock.calls.map(([id]) => id)).toEqual(['honey-mac'])
+    unmount()
+  })
+
+  it('re-probes a host whose control channel closed with an error', async () => {
+    // Why: `runtimeHostConnectionState` calls this host disconnected on a *truthy* status, so a
+    // private `status === null` predicate painted it red and then never retried it — the glyph
+    // was terminal for the session. The recovery list must come from the same derivation.
+    state.runtimeStatusByEnvironmentId.set('honey-mac', {
+      status: {
+        runtimeId: 'honey-mac',
+        graphStatus: 'ready',
+        remoteControl: { state: 'closed', lastError: 'ECONNREFUSED' }
+      }
+    })
+    const { unmount } = renderHook(() => useRemoteRuntimeRecoveryTriggers())
+
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(refreshRuntimeEnvironmentStatusMock.mock.calls.map(([id]) => id)).toEqual(['honey-mac'])
+    unmount()
+  })
+
+  it('survives a store assembly without the runtime-status slice', async () => {
+    state.omitRuntimeStatusSlice = true
+    state.runtimeStatusByEnvironmentId.set('honey-mac', { status: null })
+    const { unmount } = renderHook(() => useRemoteRuntimeRecoveryTriggers())
+
+    // Without optional chaining the sweep throws inside the timer, and the tick rejects here.
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(refreshRuntimeEnvironmentStatusMock).not.toHaveBeenCalled()
     unmount()
   })
 

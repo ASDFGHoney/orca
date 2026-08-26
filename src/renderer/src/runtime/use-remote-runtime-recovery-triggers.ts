@@ -1,26 +1,38 @@
 import { useEffect } from 'react'
+import type { RuntimeStatus } from '../../../shared/runtime-types'
 import { retryAllRemoteRuntimePtyRecoveriesNow } from '@/components/terminal-pane/remote-runtime-pty-recovery-state'
 import { useAppStore } from '@/store'
+import {
+  isDisconnectedRuntimeHostState,
+  runtimeHostConnectionStateForEntry
+} from './runtime-host-connection-state'
 import {
   retryRuntimeStatusRecoveryProbesNow,
   startRuntimeStatusRecoveryProbe
 } from './runtime-status-recovery-probe'
 
-function isUnverifiedRuntimeEnvironment(environmentId: string): boolean {
-  const entry = useAppStore.getState().runtimeStatusByEnvironmentId.get(environmentId)
-  return entry !== undefined && entry.status === null
+function isDisconnectedRuntimeEnvironment(
+  entry: { status: RuntimeStatus | null } | undefined
+): boolean {
+  return isDisconnectedRuntimeHostState(runtimeHostConnectionStateForEntry(entry))
 }
 
 export function useRemoteRuntimeRecoveryTriggers(): void {
   useEffect(() => {
     const stopStatusRecoveryProbe = startRuntimeStatusRecoveryProbe({
-      isRuntimeEnvironmentUnverified: isUnverifiedRuntimeEnvironment,
-      listUnverifiedRuntimeEnvironmentIds: () =>
+      isRuntimeEnvironmentDisconnected: (environmentId) =>
+        isDisconnectedRuntimeEnvironment(
+          useAppStore.getState().runtimeStatusByEnvironmentId.get(environmentId)
+        ),
+      listDisconnectedRuntimeEnvironmentIds: () =>
         [...useAppStore.getState().runtimeStatusByEnvironmentId]
-          .filter(([, entry]) => entry.status === null)
+          .filter(([, entry]) => isDisconnectedRuntimeEnvironment(entry))
           .map(([environmentId]) => environmentId),
+      // Optional-chained, and 'superseded' when absent: a store assembly without the slice
+      // never asked the host, so the loop must learn nothing rather than count a failure.
       refreshRuntimeEnvironmentStatus: (environmentId) =>
-        useAppStore.getState().refreshRuntimeEnvironmentStatus(environmentId),
+        useAppStore.getState().refreshRuntimeEnvironmentStatusOutcome?.(environmentId) ??
+        Promise.resolve('superseded' as const),
       subscribeToRecordedStatusChanges: (onChange) =>
         useAppStore.subscribe((state, previous) => {
           // The slice replaces the map only on a real transition, so the reference

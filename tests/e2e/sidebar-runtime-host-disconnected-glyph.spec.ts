@@ -96,13 +96,15 @@ async function seedRuntimeHostWorkspace(page: Page): Promise<GlyphFixture> {
   )
 }
 
+type SeededProbeResult = 'reachable' | 'unreachable' | 'control-channel-closed'
+
 async function recordProbeResult(
   page: Page,
   fixture: GlyphFixture,
-  reachable: boolean
+  result: SeededProbeResult
 ): Promise<void> {
   await page.evaluate(
-    ({ environmentId, reachable }) => {
+    ({ environmentId, result }) => {
       const store = window.__store
       if (!store) {
         throw new Error('window.__store is unavailable')
@@ -112,23 +114,64 @@ async function recordProbeResult(
           environmentId,
           {
             checkedAt: Date.now(),
-            status: reachable
-              ? {
-                  runtimeId: `${environmentId}-runtime`,
-                  rendererGraphEpoch: 1,
-                  graphStatus: 'ready',
-                  authoritativeWindowId: 1,
-                  desktopWindowStatus: 'available',
-                  liveTabCount: 0,
-                  liveLeafCount: 0
-                }
-              : null
+            status:
+              result === 'unreachable'
+                ? null
+                : {
+                    runtimeId: `${environmentId}-runtime`,
+                    rendererGraphEpoch: 1,
+                    graphStatus: 'ready',
+                    authoritativeWindowId: 1,
+                    desktopWindowStatus: 'available',
+                    liveTabCount: 0,
+                    liveLeafCount: 0,
+                    // A host that answered status.get while its control channel is down: truthy
+                    // status, disconnected verdict. The sidebar used to draw this one normally.
+                    ...(result === 'control-channel-closed'
+                      ? { remoteControl: { state: 'closed', lastError: 'Connection closed' } }
+                      : {})
+                  }
           }
         )
       })
     },
-    { environmentId: fixture.environmentId, reachable }
+    { environmentId: fixture.environmentId, result }
   )
+}
+
+/**
+ * Replaces the probe's network leg only. The scheduler, its backoff, the port's candidate
+ * list, the real `setRuntimeEnvironmentStatus` publication and the card's selectors all still
+ * run, so the recovery below is driven by the app, not by the test writing the status map.
+ */
+async function letTheNextProbeSucceed(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const store = window.__store
+    if (!store) {
+      throw new Error('window.__store is unavailable')
+    }
+    const probedEnvironmentIds: string[] = []
+    ;(window as never as { __probedEnvironmentIds: string[] }).__probedEnvironmentIds =
+      probedEnvironmentIds
+    store.setState({
+      refreshRuntimeEnvironmentStatusOutcome: async (environmentId: string) => {
+        probedEnvironmentIds.push(environmentId)
+        store.getState().setRuntimeEnvironmentStatus(environmentId, {
+          checkedAt: Date.now(),
+          status: {
+            runtimeId: `${environmentId}-runtime`,
+            rendererGraphEpoch: 1,
+            graphStatus: 'ready',
+            authoritativeWindowId: 1,
+            desktopWindowStatus: 'available',
+            liveTabCount: 0,
+            liveLeafCount: 0
+          }
+        } as never)
+        return 'reachable'
+      }
+    } as never)
+  })
 }
 
 function card(page: Page, fixture: GlyphFixture) {
@@ -176,7 +219,7 @@ test.describe('Sidebar runtime host disconnected glyph', () => {
     })
 
     // P2: the probe answered "unreachable". Now, and only now, the card says so.
-    await recordProbeResult(orcaPage, fixture, false)
+    await recordProbeResult(orcaPage, fixture, 'unreachable')
     await expect(card(orcaPage, fixture).locator('svg.lucide-server-off')).toBeVisible()
     await expect(card(orcaPage, fixture).locator('svg.lucide-server-off')).toHaveClass(
       /text-destructive/
@@ -191,7 +234,7 @@ test.describe('Sidebar runtime host disconnected glyph', () => {
 
     // P3: a later probe finds it reachable — the card recovers without a reload.
     // Before the fix nothing could reach this state on its own after a boot failure.
-    await recordProbeResult(orcaPage, fixture, true)
+    await recordProbeResult(orcaPage, fixture, 'reachable')
     await expect(card(orcaPage, fixture).locator('svg.lucide-server')).toBeVisible()
     await expect(card(orcaPage, fixture).locator('svg.lucide-server-off')).toHaveCount(0)
     await expect(surface(orcaPage, fixture)).not.toHaveClass(/opacity-60/)
@@ -202,6 +245,44 @@ test.describe('Sidebar runtime host disconnected glyph', () => {
     await dismissTooltips(orcaPage)
     await card(orcaPage, fixture).screenshot({
       path: testInfo.outputPath('runtime-host-glyph-recovered.png')
+    })
+  })
+
+  test('recovers a red card through the recovery loop, not a store write', async ({
+    orcaPage
+  }, testInfo) => {
+    // Why this second spec exists: the first one moves the card by writing the status map, so it
+    // can show the rendered verdict but not that the unreachable state stops being terminal. Here
+    // the only thing the test triggers is `online`; the app decides what to probe and when.
+    const fixture = await seedRuntimeHostWorkspace(orcaPage)
+    await expect(card(orcaPage, fixture)).toBeVisible()
+
+    // A truthy status whose control channel closed with an error. The shared derivation the
+    // status bar and Settings already used calls this disconnected; the sidebar did not.
+    await recordProbeResult(orcaPage, fixture, 'control-channel-closed')
+    await expect(card(orcaPage, fixture).locator('svg.lucide-server-off')).toHaveClass(
+      /text-destructive/
+    )
+    await expect(surface(orcaPage, fixture)).toHaveClass(/opacity-60/)
+    await card(orcaPage, fixture).screenshot({
+      path: testInfo.outputPath('runtime-host-glyph-control-channel-closed.png')
+    })
+
+    await letTheNextProbeSucceed(orcaPage)
+    await orcaPage.evaluate(() => window.dispatchEvent(new Event('online')))
+
+    await expect(card(orcaPage, fixture).locator('svg.lucide-server')).toBeVisible()
+    await expect(card(orcaPage, fixture).locator('svg.lucide-server-off')).toHaveCount(0)
+    await expect(surface(orcaPage, fixture)).not.toHaveClass(/opacity-60/)
+    // The loop had to enumerate this host to recover it: a private `status === null` candidate
+    // list would have skipped it, leaving the red glyph the app itself painted (#16518 review).
+    expect(
+      await orcaPage.evaluate(
+        () => (window as never as { __probedEnvironmentIds: string[] }).__probedEnvironmentIds
+      )
+    ).toContain(fixture.environmentId)
+    await card(orcaPage, fixture).screenshot({
+      path: testInfo.outputPath('runtime-host-glyph-loop-recovered.png')
     })
   })
 })
