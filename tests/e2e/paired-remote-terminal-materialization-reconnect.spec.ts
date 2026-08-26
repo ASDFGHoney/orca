@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { ElectronApplication, Page } from '@stablyai/playwright-test'
+import type { Page } from '@stablyai/playwright-test'
 import type {
   RuntimeMobileSessionTabsResult,
   RuntimeTerminalListResult,
@@ -11,6 +11,11 @@ import type {
 import { toWebTerminalSurfaceTabId } from '../../src/shared/terminal-surface-id'
 import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
+import {
+  callPairedRuntime,
+  waitForPairedClientWorktree
+} from './helpers/paired-client-host-session'
+import { revealPairedClientWindow } from './helpers/paired-client-window-reveal'
 import {
   createRuntimeDesktopPairingOffer,
   launchPairedElectronClient
@@ -59,69 +64,13 @@ function fixtureCommand(): string {
     : command.map(shellQuote).join(' ')
 }
 
-async function callRuntime<TResult>(
-  page: Page,
-  selector: string,
-  method: string,
-  params: unknown
-): Promise<TResult> {
-  return page.evaluate(
-    async ({ method, params, selector }) => {
-      const response = await window.api.runtimeEnvironments.call({ selector, method, params })
-      if (!response.ok) {
-        throw new Error(`${response.error.code}: ${response.error.message}`)
-      }
-      return response.result
-    },
-    { method, params, selector }
-  ) as Promise<TResult>
-}
-
-async function showClient(app: ElectronApplication, page: Page): Promise<void> {
-  const clientWindow = await app.browserWindow(page)
-  await clientWindow.evaluate((window) => {
-    window.show()
-    window.focus()
-  })
-  await expect.poll(() => clientWindow.evaluate((window) => window.isVisible())).toBe(true)
-}
-
-async function waitForClientWorktree(page: Page, expectedId?: string): Promise<string> {
-  await expect
-    .poll(
-      () =>
-        page.evaluate(
-          (id) =>
-            window.__store
-              ?.getState()
-              .allWorktrees()
-              .find((worktree) => !id || worktree.id === id)?.id ?? null,
-          expectedId
-        ),
-      { timeout: 30_000 }
-    )
-    .not.toBeNull()
-  const worktreeId = await page.evaluate(
-    (id) =>
-      window.__store
-        ?.getState()
-        .allWorktrees()
-        .find((worktree) => !id || worktree.id === id)?.id ?? null,
-    expectedId
-  )
-  if (!worktreeId) {
-    throw new Error('Paired client did not receive the host workspace')
-  }
-  return worktreeId
-}
-
 async function hostSurfaceStatus(
   page: Page,
   environmentId: string,
   worktreeId: string,
   parentTabId: string
 ): Promise<string | null> {
-  const snapshot = await callRuntime<RuntimeMobileSessionTabsResult>(
+  const snapshot = await callPairedRuntime<RuntimeMobileSessionTabsResult>(
     page,
     environmentId,
     'session.tabs.list',
@@ -146,7 +95,7 @@ async function parkHostTerminal(
 ): Promise<void> {
   let lastError = 'terminal.stopExact was never attempted'
   for (let attempt = 0; attempt < 10; attempt += 1) {
-    const stop = await callRuntime<{
+    const stop = await callPairedRuntime<{
       stopped: number
       stoppedPtyIds: string[]
       postStopVerified: boolean
@@ -184,7 +133,7 @@ async function runMaterializationJourney(
   worktreeId: string
 ): Promise<void> {
   writeFileSync(processedInputPath, '')
-  const created = await callRuntime<{
+  const created = await callPairedRuntime<{
     tab: { parentTabId: string; terminal: string | null }
   }>(page, environmentId, 'session.tabs.createTerminal', {
     worktree: `id:${worktreeId}`,
@@ -209,7 +158,7 @@ async function runMaterializationJourney(
     .poll(() => getTerminalContent(page), { timeout: 30_000 })
     .toContain('MATERIALIZE_READY')
 
-  const originalTerminal = await callRuntime<{ terminal: RuntimeTerminalShow }>(
+  const originalTerminal = await callPairedRuntime<{ terminal: RuntimeTerminalShow }>(
     page,
     environmentId,
     'terminal.show',
@@ -262,7 +211,7 @@ async function runMaterializationJourney(
   await expect
     .poll(
       async () => {
-        const snapshot = await callRuntime<RuntimeMobileSessionTabsResult>(
+        const snapshot = await callPairedRuntime<RuntimeMobileSessionTabsResult>(
           page,
           environmentId,
           'session.tabs.list',
@@ -290,7 +239,7 @@ async function runMaterializationJourney(
   expect(replacementClientPtyId).not.toBe(originalClientPtyId)
 
   const marker = `MATERIALIZED_${Date.now()}`
-  await callRuntime(page, environmentId, 'terminal.send', {
+  await callPairedRuntime(page, environmentId, 'terminal.send', {
     terminal: replacementHandle,
     text: `echo ${marker}\r`,
     client: { id: 'paired-materialization-e2e', type: 'desktop' }
@@ -298,7 +247,7 @@ async function runMaterializationJourney(
   await expect
     .poll(
       async () => {
-        const read = await callRuntime<{ terminal: RuntimeTerminalRead }>(
+        const read = await callPairedRuntime<{ terminal: RuntimeTerminalRead }>(
           page,
           environmentId,
           'terminal.read',
@@ -316,7 +265,7 @@ async function runMaterializationJourney(
   await tab.click()
   await expect.poll(() => getTerminalContent(page), { timeout: 10_000 }).toContain(marker)
 
-  const listed = await callRuntime<RuntimeTerminalListResult>(
+  const listed = await callPairedRuntime<RuntimeTerminalListResult>(
     page,
     environmentId,
     'terminal.list',
@@ -328,7 +277,7 @@ async function runMaterializationJourney(
   expect(
     listed.terminals.filter((terminal) => terminal.tabId === created.tab.parentTabId)
   ).toHaveLength(1)
-  await callRuntime(page, environmentId, 'terminal.closeTab', { terminal: replacementHandle })
+  await callPairedRuntime(page, environmentId, 'terminal.closeTab', { terminal: replacementHandle })
 }
 
 test('materializes a stopped terminal on reconnect from a headed paired host', async ({
@@ -342,11 +291,11 @@ test('materializes a stopped terminal on reconnect from a headed paired host', a
   const offer = await createRuntimeDesktopPairingOffer(orcaPage)
   const client = await launchPairedElectronClient(offer, testInfo, 'headed-materialization-client')
   try {
-    await showClient(client.app, client.page)
+    await revealPairedClientWindow(client)
     await runMaterializationJourney(
       client.page,
       client.environmentId,
-      await waitForClientWorktree(client.page, worktreeId)
+      await waitForPairedClientWorktree(client.page, worktreeId)
     )
     expect(await client.getDirectSshAttemptTargetIds()).toEqual([])
   } finally {
@@ -377,11 +326,11 @@ test.fixme('materializes a stopped terminal on reconnect from a headless folder 
     throw error
   })
   try {
-    await showClient(client.app, client.page)
+    await revealPairedClientWindow(client)
     await runMaterializationJourney(
       client.page,
       client.environmentId,
-      await waitForClientWorktree(client.page)
+      await waitForPairedClientWorktree(client.page)
     )
     expect(await client.getDirectSshAttemptTargetIds()).toEqual([])
   } finally {

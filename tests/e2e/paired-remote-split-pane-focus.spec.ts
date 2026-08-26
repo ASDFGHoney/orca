@@ -3,41 +3,19 @@
  * splitManagedPane focus; the pane arrives later from the host's session-tabs
  * mirror, focused only if the client claimed its leaf first (#16510).
  */
-import type { ElectronApplication, Page } from '@stablyai/playwright-test'
 import { REQUEST_ACTIVE_TERMINAL_PANE_SPLIT_EVENT } from '../../src/renderer/src/constants/terminal'
 import { toWebTerminalSurfaceTabId } from '../../src/shared/terminal-surface-id'
 import { expect, test } from './helpers/orca-app'
+import {
+  callPairedRuntime,
+  waitForPairedClientWorktree
+} from './helpers/paired-client-host-session'
+import { revealPairedClientWindow } from './helpers/paired-client-window-reveal'
 import {
   createRuntimeDesktopPairingOffer,
   launchPairedElectronClient
 } from './helpers/paired-electron-client'
 import { waitForActivePanePtyId, waitForPaneCount } from './helpers/terminal'
-
-async function showClient(app: ElectronApplication, page: Page): Promise<void> {
-  const clientWindow = await app.browserWindow(page)
-  await clientWindow.evaluate((window) => {
-    window.show()
-    window.focus()
-  })
-  await expect.poll(() => clientWindow.evaluate((window) => window.isVisible())).toBe(true)
-}
-
-async function waitForClientWorktree(page: Page, expectedId: string): Promise<void> {
-  await expect
-    .poll(
-      () =>
-        page.evaluate(
-          (id) =>
-            window.__store
-              ?.getState()
-              .allWorktrees()
-              .find((worktree) => worktree.id === id)?.id ?? null,
-          expectedId
-        ),
-      { timeout: 30_000 }
-    )
-    .toBe(expectedId)
-}
 
 test('focuses the pane a client split creates on a paired remote workspace', async ({
   orcaPage
@@ -50,27 +28,19 @@ test('focuses the pane a client split creates on a paired remote workspace', asy
   const offer = await createRuntimeDesktopPairingOffer(orcaPage)
   const client = await launchPairedElectronClient(offer, testInfo, 'paired-split-focus-client')
   try {
-    await showClient(client.app, client.page)
-    await waitForClientWorktree(client.page, hostWorktreeId)
+    await revealPairedClientWindow(client)
+    await waitForPairedClientWorktree(client.page, hostWorktreeId)
 
-    const created = await client.page.evaluate(
-      async ({ selector, worktreeId }) => {
-        const response = await window.api.runtimeEnvironments.call({
-          selector,
-          method: 'session.tabs.createTerminal',
-          params: {
-            worktree: `id:${worktreeId}`,
-            activate: false,
-            select: false,
-            navigation: 'caller'
-          }
-        })
-        if (!response.ok) {
-          throw new Error(`${response.error.code}: ${response.error.message}`)
-        }
-        return response.result as { tab: { parentTabId: string } }
-      },
-      { selector: client.environmentId, worktreeId: hostWorktreeId }
+    const created = await callPairedRuntime<{ tab: { parentTabId: string } }>(
+      client.page,
+      client.environmentId,
+      'session.tabs.createTerminal',
+      {
+        worktree: `id:${hostWorktreeId}`,
+        activate: false,
+        select: false,
+        navigation: 'caller'
+      }
     )
 
     const webTabId = toWebTerminalSurfaceTabId(created.tab.parentTabId)
