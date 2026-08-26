@@ -11,6 +11,7 @@ import {
   resetWebSessionFocusIntentForTests
 } from './web-session-focus-intent'
 import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
+import { replaceRuntimeEnvironmentRevisions } from './runtime-environment-revision'
 
 const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
@@ -73,6 +74,7 @@ vi.mock('./web-runtime-browser-materialization', () => ({
 afterEach(() => {
   resetWebSessionCloseIntentForTests()
   resetWebSessionFocusIntentForTests()
+  replaceRuntimeEnvironmentRevisions([])
 })
 
 const SPLIT_WT = 'repo::/worktree'
@@ -222,6 +224,47 @@ describe('splitWebRuntimeTerminal', () => {
     )
     // The host can publish the split before the RPC answers, so the intent needs a replay behind it.
     await vi.waitFor(() => expect(mocks.acceptReplayedWebSessionTabsSnapshot).toHaveBeenCalled())
+  })
+
+  it('fences the host split on the revision the focus claim captured', async () => {
+    stubSplitSourceTab('tab-1')
+    replaceRuntimeEnvironmentRevisions([{ id: 'web-env-1', createdAt: 7 }])
+    let answerSplit!: (response: unknown) => void
+    const runtimeCall = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          answerSplit = resolve
+        })
+    )
+    vi.stubGlobal('window', {
+      api: { runtimeEnvironments: { call: runtimeCall } }
+    })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(1))
+    expect(runtimeCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'terminal.split',
+        expectedEnvironmentPairingRevision: 7
+      })
+    )
+
+    // Why: a same-id re-pair while the split is in flight belongs to a different host, so the
+    // claim must not land on the replacement's mirror.
+    replaceRuntimeEnvironmentRevisions([{ id: 'web-env-1', createdAt: 9 }])
+    answerSplit({
+      id: 'split',
+      ok: true,
+      result: {
+        split: { handle: 'terminal-2', tabId: 'tab-1', paneRuntimeId: -1, leafId: 'leaf-2' }
+      }
+    })
+
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(1))
+    expect(peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WT)).toBeNull()
   })
 
   it('leaves focus alone when the host cannot name the created leaf', async () => {

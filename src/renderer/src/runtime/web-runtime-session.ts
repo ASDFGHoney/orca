@@ -1482,17 +1482,18 @@ export function splitWebRuntimeTerminal(
     pendingMirrorSuppressionId
   )
   const intentOwner = captureWebSessionIntentOwner(environmentId)
-  void window.api.runtimeEnvironments
-    .call({
-      selector: environmentId,
-      method: 'terminal.split',
-      params: {
-        terminal: remote.handle,
-        direction,
-        telemetrySource
-      },
-      timeoutMs: 15_000
-    })
+  // Why: the split and the focus claim below must agree on one host. Unfenced, a same-id
+  // re-pair mid-dispatch would split the replacement host and then silently drop the claim.
+  const callEnvironment = captureRuntimeEnvironmentCall(environmentId, intentOwner.pairingRevision)
+  void callEnvironment({
+    method: 'terminal.split',
+    params: {
+      terminal: remote.handle,
+      direction,
+      telemetrySource
+    },
+    timeoutMs: 15_000
+  })
     .then(async (response) => {
       const result = unwrapRuntimeRpcResult(
         response as RuntimeRpcResponse<{ split: RuntimeTerminalSplit }>
