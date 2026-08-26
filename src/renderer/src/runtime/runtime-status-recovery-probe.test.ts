@@ -199,6 +199,32 @@ describe('runtime status recovery probe', () => {
     expect(refresh).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps probing other hosts while one probe never settles', async () => {
+    // Why: the sweep is the recovery mechanism of last resort. A refresh that never
+    // settles — a wedged IPC round trip — must not take every other host's retry
+    // down with it, which is exactly what deferring the re-arm to the probe did.
+    const { port, refresh, markUnverified } = createPort()
+    markUnverified('wedged-host')
+    markUnverified('honey-mac')
+    refresh.mockImplementation((environmentId: string) =>
+      environmentId === 'wedged-host' ? new Promise<boolean>(() => {}) : Promise.resolve(false)
+    )
+    stop = startRuntimeStatusRecoveryProbe(port)
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(refresh.mock.calls.filter(([id]) => id === 'honey-mac')).toHaveLength(1)
+
+    // honey-mac failed, so it is due again 10s later regardless of the wedged host.
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(refresh.mock.calls.filter(([id]) => id === 'honey-mac')).toHaveLength(2)
+
+    // The wedged host is re-checked on the pending guard rather than re-probed, and the
+    // guard keeps that from degenerating into a zero-delay timer loop.
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(refresh.mock.calls.filter(([id]) => id === 'wedged-host')).toHaveLength(1)
+  })
+
   it('probes nothing after it is stopped', async () => {
     const { port, refresh, markUnverified } = createPort()
     markUnverified('honey-mac')

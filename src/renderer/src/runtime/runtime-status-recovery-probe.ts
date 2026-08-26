@@ -14,6 +14,8 @@
 
 const RECOVERY_PROBE_BASE_DELAY_MS = 5_000
 const RECOVERY_PROBE_MAX_DELAY_MS = 60_000
+/** Longer than the probe's own 10s timeout, so this only governs a refresh that never settles. */
+const RECOVERY_PROBE_PENDING_GUARD_MS = 15_000
 
 export type RuntimeStatusRecoveryPort = {
   /** True when the environment has a status entry whose last probe recorded `null`. */
@@ -48,6 +50,15 @@ function backoffFor(environmentId: string, now: number): RecoveryBackoff {
   return entry
 }
 
+/** Why not the stored deadline while a probe is in flight: that deadline is already in the
+ * past, so scheduling against it would spin, and skipping the schedule entirely would let one
+ * never-settling probe strand every other host. */
+function nextAttemptAtFor(environmentId: string, now: number): number {
+  return probingEnvironments.has(environmentId)
+    ? now + RECOVERY_PROBE_PENDING_GUARD_MS
+    : backoffFor(environmentId, now).nextAttemptAt
+}
+
 function recordProbeFailure(environmentId: string): void {
   const now = Date.now()
   const entry = backoffFor(environmentId, now)
@@ -73,7 +84,9 @@ function probe(environmentId: string): void {
     .catch(() => recordProbeFailure(environmentId))
     .finally(() => {
       probingEnvironments.delete(environmentId)
-      scheduleNextSweep()
+      // Rearm, not schedule: this host's new deadline can be earlier than the pending
+      // guard the sweep armed against while the probe was in flight.
+      rearmSweep()
     })
 }
 
@@ -89,7 +102,7 @@ function scheduleNextSweep(): void {
   }
   const now = Date.now()
   const earliestAttemptAt = Math.min(
-    ...unverified.map((environmentId) => backoffFor(environmentId, now).nextAttemptAt)
+    ...unverified.map((environmentId) => nextAttemptAtFor(environmentId, now))
   )
   // Recovered and removed environments must not keep a retry budget alive.
   const stillUnverified = new Set(unverified)
@@ -113,17 +126,22 @@ function sweep(): void {
     return
   }
   const now = Date.now()
-  let probed = false
   for (const environmentId of active.listUnverifiedRuntimeEnvironmentIds()) {
     if (backoffFor(environmentId, now).nextAttemptAt <= now) {
       probe(environmentId)
-      probed = true
     }
   }
-  // Why: a sweep that probed nothing still has to re-arm for whoever is due next.
-  if (!probed || probingEnvironments.size === 0) {
-    scheduleNextSweep()
+  // Unconditional: every sweep must leave a timer armed for whoever is due next, or a
+  // probe that never settles ends the recovery loop for all of them.
+  scheduleNextSweep()
+}
+
+function rearmSweep(): void {
+  if (timer !== null) {
+    clearTimeout(timer)
+    timer = null
   }
+  scheduleNextSweep()
 }
 
 /**
@@ -144,14 +162,8 @@ export function noteRuntimeEnvironmentReachable(environmentId: string): void {
 
 export function startRuntimeStatusRecoveryProbe(next: RuntimeStatusRecoveryPort): () => void {
   port = next
-  const unsubscribe = next.subscribeToRecordedStatusChanges(() => {
-    // Re-arm against the new set; each host keeps the retry budget it had earned.
-    if (timer !== null) {
-      clearTimeout(timer)
-      timer = null
-    }
-    scheduleNextSweep()
-  })
+  // Re-arm against the new set; each host keeps the retry budget it had earned.
+  const unsubscribe = next.subscribeToRecordedStatusChanges(rearmSweep)
   scheduleNextSweep()
   return () => {
     unsubscribe()
