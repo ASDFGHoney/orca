@@ -105,6 +105,10 @@ describe('worktree card runtime host state', () => {
   })
 
   it('still reports a host whose remote control closed with an error', () => {
+    // Deliberate: the status bar and Settings > Available Hosts already read this host as
+    // disconnected, so the sidebar was the outlier. A closed channel that recorded a lastError is
+    // the host's own report, not silence — and the recovery loop now retries it (#16518 review b1).
+
     setRuntimeStatus({
       status: {
         runtimeId: 'honey-mac-runtime',
