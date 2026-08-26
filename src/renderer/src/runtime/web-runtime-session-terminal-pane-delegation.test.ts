@@ -6,6 +6,11 @@ import {
   splitWebRuntimeTerminal
 } from './web-runtime-session'
 import { resetWebSessionCloseIntentForTests } from './web-session-close-intent'
+import {
+  peekWebSessionFocusIntent,
+  resetWebSessionFocusIntentForTests
+} from './web-session-focus-intent'
+import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
 
 const mocks = vi.hoisted(() => ({
   getState: vi.fn(),
@@ -65,7 +70,21 @@ vi.mock('./web-runtime-browser-materialization', () => ({
   hasMaterializedWebRuntimeBrowserPage: mocks.hasMaterializedWebRuntimeBrowserPage
 }))
 
-afterEach(() => resetWebSessionCloseIntentForTests())
+afterEach(() => {
+  resetWebSessionCloseIntentForTests()
+  resetWebSessionFocusIntentForTests()
+})
+
+const SPLIT_WT = 'repo::/worktree'
+
+/** Store shape the split focus claim reads to find the worktree owning the host tab. */
+function stubSplitSourceTab(hostTabId: string): void {
+  mocks.getState.mockReturnValue({
+    tabsByWorktree: {
+      [SPLIT_WT]: [{ id: toWebTerminalSurfaceTabId(hostTabId), worktreeId: SPLIT_WT }]
+    }
+  })
+}
 
 describe('splitWebRuntimeTerminal', () => {
   beforeEach(() => {
@@ -171,6 +190,64 @@ describe('splitWebRuntimeTerminal', () => {
     )
 
     await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(1))
+  })
+
+  it('claims the created leaf so the mirrored split arrives focused', async () => {
+    stubSplitSourceTab('tab-1')
+    const runtimeCall = vi.fn().mockResolvedValue({
+      id: 'split',
+      ok: true,
+      result: {
+        split: {
+          handle: 'terminal-2',
+          tabId: 'tab-1',
+          paneRuntimeId: -1,
+          leafId: 'leaf-2'
+        }
+      }
+    })
+    vi.stubGlobal('window', {
+      api: { runtimeEnvironments: { call: runtimeCall } }
+    })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+
+    await vi.waitFor(() =>
+      expect(peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WT)).toEqual({
+        hostTabId: 'tab-1',
+        leafId: 'leaf-2'
+      })
+    )
+    // The host can publish the split before the RPC answers, so the intent needs a replay behind it.
+    await vi.waitFor(() => expect(mocks.acceptReplayedWebSessionTabsSnapshot).toHaveBeenCalled())
+  })
+
+  it('leaves focus alone when the host cannot name the created leaf', async () => {
+    stubSplitSourceTab('tab-1')
+    const runtimeCall = vi.fn().mockResolvedValue({
+      id: 'split',
+      ok: true,
+      result: {
+        split: {
+          handle: 'terminal-2',
+          tabId: 'tab-1',
+          paneRuntimeId: -1
+        }
+      }
+    })
+    vi.stubGlobal('window', {
+      api: { runtimeEnvironments: { call: runtimeCall } }
+    })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+
+    await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(1))
+    expect(peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WT)).toBeNull()
+    expect(mocks.acceptReplayedWebSessionTabsSnapshot).not.toHaveBeenCalled()
   })
 })
 

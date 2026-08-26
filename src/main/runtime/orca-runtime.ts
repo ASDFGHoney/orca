@@ -30355,8 +30355,13 @@ export class OrcaRuntimeService {
       telemetrySource: opts.telemetrySource
     })
 
-    const newHandle = await this.waitForNewLeafInTab(leaf.tabId, leafKeysBefore)
-    return { handle: newHandle, tabId: leaf.tabId, paneRuntimeId: leaf.paneRuntimeId }
+    const created = await this.waitForNewLeafInTab(leaf.tabId, leafKeysBefore)
+    return {
+      handle: created.handle,
+      tabId: leaf.tabId,
+      paneRuntimeId: leaf.paneRuntimeId,
+      leafId: created.leafId
+    }
   }
 
   private async splitPtyBackedTerminal(
@@ -30546,7 +30551,12 @@ export class OrcaRuntimeService {
       void revealSplit().catch(() => undefined)
     }
 
-    return { handle: this.issuePtyHandle(createdPty ?? pty), tabId: parentTabId, paneRuntimeId: -1 }
+    return {
+      handle: this.issuePtyHandle(createdPty ?? pty),
+      tabId: parentTabId,
+      paneRuntimeId: -1,
+      leafId
+    }
   }
 
   private resolveTerminalSplitSourceAuthority(
@@ -30681,11 +30691,11 @@ export class OrcaRuntimeService {
     tabId: string,
     existingLeafKeys: Set<string>,
     timeoutMs = 10_000
-  ): Promise<string> {
-    const tryResolve = (): string | null => {
+  ): Promise<{ handle: string; leafId: string }> {
+    const tryResolve = (): { handle: string; leafId: string } | null => {
       for (const [key, leaf] of this.leaves) {
         if (leaf.tabId === tabId && !existingLeafKeys.has(key) && leaf.ptyId !== null) {
-          return this.issueHandle(leaf)
+          return { handle: this.issueHandle(leaf), leafId: leaf.leafId }
         }
       }
       return null
@@ -30696,7 +30706,7 @@ export class OrcaRuntimeService {
       return Promise.resolve(existing)
     }
 
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<{ handle: string; leafId: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
         const idx = this.graphSyncCallbacks.indexOf(check)
         if (idx !== -1) {
@@ -30706,14 +30716,14 @@ export class OrcaRuntimeService {
       }, timeoutMs)
 
       const check = (): void => {
-        const handle = tryResolve()
-        if (handle) {
+        const created = tryResolve()
+        if (created) {
           clearTimeout(timer)
           const idx = this.graphSyncCallbacks.indexOf(check)
           if (idx !== -1) {
             this.graphSyncCallbacks.splice(idx, 1)
           }
-          resolve(handle)
+          resolve(created)
         }
       }
       this.graphSyncCallbacks.push(check)

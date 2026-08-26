@@ -257,6 +257,9 @@ export type RuntimeTerminalSplit = {
   handle: string
   tabId: string
   paneRuntimeId: number
+  // Why: names the created pane for a caller that has to address it before the
+  // host publishes it. Optional: hosts predating this field omit it.
+  leafId?: string
 }
 
 export type RuntimeTerminalResolvePane = {

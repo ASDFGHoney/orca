@@ -691,4 +691,88 @@ describe('applyWebSessionTabsSnapshot', () => {
       SECOND_LEAF_ID
     )
   })
+  it('activates a host-split leaf only when the splitting client claimed it', () => {
+    const mirroredTabId = toWebTerminalSurfaceTabId('host-tab-1')
+    const sourceOnlyLayout = {
+      root: { type: 'leaf' as const, leafId: LEAF_ID },
+      activeLeafId: LEAF_ID,
+      expandedLeafId: null,
+      ptyIdsByLeafId: { [LEAF_ID]: 'remote:web-env-1@@terminal-1' }
+    }
+    const splitLayout = {
+      root: {
+        type: 'split' as const,
+        direction: 'vertical' as const,
+        first: { type: 'leaf' as const, leafId: LEAF_ID },
+        second: { type: 'leaf' as const, leafId: SECOND_LEAF_ID }
+      },
+      activeLeafId: SECOND_LEAF_ID,
+      expandedLeafId: null,
+      ptyIdsByLeafId: {
+        [LEAF_ID]: 'remote:web-env-1@@terminal-1',
+        [SECOND_LEAF_ID]: 'remote:web-env-1@@terminal-2'
+      }
+    }
+    const state = makeState({
+      activeTabId: mirroredTabId,
+      activeTabIdByWorktree: { [WT]: mirroredTabId },
+      tabsByWorktree: {
+        [WT]: [
+          {
+            id: mirroredTabId,
+            ptyId: 'remote:web-env-1@@terminal-1',
+            worktreeId: WT,
+            title: 'shell',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: NOW
+          }
+        ]
+      },
+      terminalLayoutsByTabId: { [mirroredTabId]: sourceOnlyLayout }
+    })
+    const splitSnapshot = makeSnapshot([
+      {
+        type: 'terminal',
+        id: `host-tab-1::${LEAF_ID}`,
+        title: 'shell',
+        parentTabId: 'host-tab-1',
+        leafId: LEAF_ID,
+        parentLayout: splitLayout,
+        isActive: false,
+        status: 'ready',
+        terminal: 'terminal-1'
+      },
+      {
+        type: 'terminal',
+        id: `host-tab-1::${SECOND_LEAF_ID}`,
+        title: 'shell',
+        parentTabId: 'host-tab-1',
+        leafId: SECOND_LEAF_ID,
+        parentLayout: splitLayout,
+        isActive: true,
+        status: 'ready',
+        terminal: 'terminal-2'
+      }
+    ])
+
+    // Unclaimed: host-active must not move this client's focus (#5435).
+    const unclaimed = applyWebSessionTabsSnapshot(
+      state,
+      splitSnapshot,
+      ENV,
+      NOW + 10
+    ) as Partial<WebSessionTabsSyncState>
+    expect(unclaimed.terminalLayoutsByTabId?.[mirroredTabId]?.activeLeafId).toBe(LEAF_ID)
+
+    recordWebSessionFocusIntent({ environmentId: ENV }, WT, 'host-tab-1', SECOND_LEAF_ID)
+    const claimed = applyWebSessionTabsSnapshot(
+      state,
+      splitSnapshot,
+      ENV,
+      NOW + 20
+    ) as Partial<WebSessionTabsSyncState>
+    expect(claimed.terminalLayoutsByTabId?.[mirroredTabId]?.activeLeafId).toBe(SECOND_LEAF_ID)
+  })
 })

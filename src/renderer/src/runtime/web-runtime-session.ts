@@ -1481,6 +1481,7 @@ export function splitWebRuntimeTerminal(
     direction,
     pendingMirrorSuppressionId
   )
+  const intentOwner = captureWebSessionIntentOwner(environmentId)
   void window.api.runtimeEnvironments
     .call({
       selector: environmentId,
@@ -1492,8 +1493,11 @@ export function splitWebRuntimeTerminal(
       },
       timeoutMs: 15_000
     })
-    .then((response) => {
-      unwrapRuntimeRpcResult(response as RuntimeRpcResponse<{ split: RuntimeTerminalSplit }>)
+    .then(async (response) => {
+      const result = unwrapRuntimeRpcResult(
+        response as RuntimeRpcResponse<{ split: RuntimeTerminalSplit }>
+      )
+      await focusSplitWebRuntimeTerminalPane(intentOwner, result?.split)
     })
     .catch((error) => {
       releasePendingMirrorSuppression()
@@ -1504,6 +1508,45 @@ export function splitWebRuntimeTerminal(
       console.warn('[web-runtime-session] failed to split terminal:', message)
     })
   return true
+}
+
+// Why: the mirrored layout keeps whichever leaf this client already had active, so a
+// host-delegated split lands unfocused unless the initiator claims the new leaf the way
+// createWebRuntimeSessionTerminal claims a created tab.
+async function focusSplitWebRuntimeTerminalPane(
+  intentOwner: WebSessionIntentOwner,
+  split: RuntimeTerminalSplit | undefined
+): Promise<void> {
+  const hostTabId = split?.tabId?.trim()
+  // Why: hosts predating RuntimeTerminalSplit.leafId cannot name the new pane; leave
+  // their focus where it is rather than claiming the wrong leaf.
+  const leafId = split?.leafId?.trim()
+  if (!hostTabId || !leafId || !matchesWebSessionIntentOwner(intentOwner)) {
+    return
+  }
+  const worktreeId = resolveWebRuntimeSessionWorktreeIdForHostTab(hostTabId)
+  if (!worktreeId) {
+    return
+  }
+  recordWebSessionFocusIntent(intentOwner, worktreeId, hostTabId, leafId)
+  await refreshWebRuntimeSessionTabsSnapshot(intentOwner.environmentId, worktreeId, {
+    ...(intentOwner.pairingRevision !== undefined
+      ? { expectedEnvironmentPairingRevision: intentOwner.pairingRevision }
+      : {}),
+    // Why: the host can publish the split before the RPC answers; replay it once the intent exists.
+    acceptCurrentSnapshot: true
+  })
+}
+
+function resolveWebRuntimeSessionWorktreeIdForHostTab(hostTabId: string): string | null {
+  const localTabId = toWebTerminalSurfaceTabId(hostTabId)
+  for (const tabs of Object.values(useAppStore.getState()?.tabsByWorktree ?? {})) {
+    const owner = tabs.find((tab) => tab.id === localTabId || tab.id === hostTabId)
+    if (owner) {
+      return owner.worktreeId
+    }
+  }
+  return null
 }
 
 export function consumePendingWebRuntimeSplitMirrorTelemetry(

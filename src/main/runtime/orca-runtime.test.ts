@@ -15824,7 +15824,8 @@ describe('OrcaRuntimeService', () => {
       (spawn.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
     const sourceLeafId = sourceEnv.ORCA_PANE_KEY.slice(`${sourceEnv.ORCA_TAB_ID}:`.length)
 
-    await expect(runtime.splitTerminal(handle, { direction: 'vertical' })).resolves.toMatchObject({
+    const split = await runtime.splitTerminal(handle, { direction: 'vertical' })
+    expect(split).toMatchObject({
       handle: expect.stringMatching(/^term_/),
       tabId: sourceEnv.ORCA_TAB_ID,
       paneRuntimeId: -1
@@ -15833,6 +15834,8 @@ describe('OrcaRuntimeService', () => {
     const splitEnv =
       (spawn.mock.calls[1]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
     const splitLeafId = splitEnv.ORCA_PANE_KEY.slice(`${sourceEnv.ORCA_TAB_ID}:`.length)
+    // Why: a paired client can only claim focus for the new pane if the result names its leaf.
+    expect(split.leafId).toBe(splitLeafId)
     expect(splitTerminal).not.toHaveBeenCalled()
     expect(splitEnv.ORCA_TAB_ID).toBe(sourceEnv.ORCA_TAB_ID)
     expect(splitEnv.ORCA_WORKTREE_ID).toBe(TEST_WORKTREE_ID)
