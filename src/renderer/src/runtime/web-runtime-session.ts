@@ -1507,10 +1507,21 @@ export function splitWebRuntimeTerminal(
       const message = error instanceof Error ? error.message : String(error)
       // Why: a split that fails only in the console leaves the user with a pane that silently
       // never appears.
-      toast.error(message)
+      toast.error(webRuntimeSplitFailureNotice(error, message))
       console.warn('[web-runtime-session] failed to split terminal:', message)
     })
   return true
+}
+
+/** Why: the pairing fence rejects with transport text written for logs, so the toast says what
+ *  actually happened instead of naming our internals. */
+function webRuntimeSplitFailureNotice(error: unknown, rawMessage: string): string {
+  return hasRuntimeRpcErrorCode(error, 'runtime_environment_changed')
+    ? translate(
+        'auto.runtime.webRuntimeSession.splitPairingChanged',
+        'The remote host reconnected before the split ran. Split the pane again.'
+      )
+    : rawMessage
 }
 
 /** Claims the split's new leaf so the mirror activates it instead of the pane that was split.

@@ -14,6 +14,7 @@ import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
 import { replaceRuntimeEnvironmentRevisions } from './runtime-environment-revision'
 
 const mocks = vi.hoisted(() => ({
+  toastError: vi.fn(),
   getState: vi.fn(),
   setState: vi.fn(),
   subscribe: vi.fn(),
@@ -33,6 +34,8 @@ const mocks = vi.hoisted(() => ({
   getRuntimeEnvironmentIdForWorktree: vi.fn(),
   hasMaterializedWebRuntimeBrowserPage: vi.fn()
 }))
+
+vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }))
 
 vi.mock('../store', () => ({
   useAppStore: {
@@ -75,6 +78,7 @@ afterEach(() => {
   resetWebSessionCloseIntentForTests()
   resetWebSessionFocusIntentForTests()
   replaceRuntimeEnvironmentRevisions([])
+  mocks.toastError.mockReset()
 })
 
 const SPLIT_WT = 'repo::/worktree'
@@ -291,6 +295,49 @@ describe('splitWebRuntimeTerminal', () => {
     await vi.waitFor(() => expect(runtimeCall).toHaveBeenCalledTimes(1))
     expect(peekWebSessionFocusIntent({ environmentId: 'web-env-1' }, SPLIT_WT)).toBeNull()
     expect(mocks.acceptReplayedWebSessionTabsSnapshot).not.toHaveBeenCalled()
+  })
+
+  it('tells the user the host re-paired instead of showing the fence transport text', async () => {
+    stubSplitSourceTab('tab-1')
+    const runtimeCall = vi.fn().mockResolvedValue({
+      id: 'split',
+      ok: false,
+      error: {
+        code: 'runtime_environment_changed',
+        message: 'Runtime environment pairing changed; refresh and try again'
+      }
+    })
+    vi.stubGlobal('window', {
+      api: { runtimeEnvironments: { call: runtimeCall } }
+    })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+
+    await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalledTimes(1))
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      'The remote host reconnected before the split ran. Split the pane again.'
+    )
+  })
+
+  it('leaves an unclassified split failure speaking for itself', async () => {
+    stubSplitSourceTab('tab-1')
+    const runtimeCall = vi.fn().mockResolvedValue({
+      id: 'split',
+      ok: false,
+      error: { code: 'terminal_split_source_not_found', message: 'terminal_split_source_not_found' }
+    })
+    vi.stubGlobal('window', {
+      api: { runtimeEnvironments: { call: runtimeCall } }
+    })
+
+    expect(splitWebRuntimeTerminal('remote:web-env-1@@terminal-1', 'vertical', 'keyboard')).toBe(
+      true
+    )
+
+    await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalledTimes(1))
+    expect(mocks.toastError).toHaveBeenCalledWith('terminal_split_source_not_found')
   })
 })
 
